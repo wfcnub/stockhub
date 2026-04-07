@@ -7,7 +7,11 @@ import type { TickerListItem, Index } from '@/types';
 import { getIndexes, getTickers } from '@/lib/api';
 import { ControlShell } from '@/components/layout/ControlShell';
 
-const ITEMS_PER_PAGE = 50;
+const DEFAULT_ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE_OPTIONS = [10, 20, 50] as const;
+
+type SortField = 'symbol' | 'name';
+type SortOrder = 'asc' | 'desc';
 
 function TickersContent() {
   const router = useRouter();
@@ -15,6 +19,12 @@ function TickersContent() {
   
   const initialSearch = searchParams.get('search') || '';
   const initialIndex = searchParams.get('index') || '';
+  const initialPageSizeValue = Number(searchParams.get('page_size'));
+  const initialItemsPerPage = ITEMS_PER_PAGE_OPTIONS.includes(initialPageSizeValue as 10 | 20 | 50)
+    ? initialPageSizeValue
+    : DEFAULT_ITEMS_PER_PAGE;
+  const initialSortBy: SortField = searchParams.get('sort_by') === 'name' ? 'name' : 'symbol';
+  const initialSortOrder: SortOrder = searchParams.get('sort_order') === 'desc' ? 'desc' : 'asc';
   
   const [tickers, setTickers] = useState<TickerListItem[]>([]);
   const [indexes, setIndexes] = useState<Index[]>([]);
@@ -24,6 +34,9 @@ function TickersContent() {
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
+  const [itemsPerPage, setItemsPerPage] = useState(initialItemsPerPage);
+  const [sortBy, setSortBy] = useState<SortField>(initialSortBy);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
   const [page, setPage] = useState(0);
 
   const fetchTickers = useCallback(async () => {
@@ -32,10 +45,12 @@ function TickersContent() {
     
     try {
       const response = await getTickers({
-        skip: page * ITEMS_PER_PAGE,
-        limit: ITEMS_PER_PAGE,
+        offset: page * itemsPerPage,
+        limit: itemsPerPage,
         search: searchQuery || undefined,
         index: selectedIndex || undefined,
+        sort_by: sortBy,
+        sort_order: sortOrder,
       });
       
       setTickers(response.data);
@@ -45,7 +60,7 @@ function TickersContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, searchQuery, selectedIndex]);
+  }, [page, itemsPerPage, searchQuery, selectedIndex, sortBy, sortOrder]);
 
   useEffect(() => {
     fetchTickers();
@@ -70,8 +85,12 @@ function TickersContent() {
     const params = new URLSearchParams();
     if (searchQuery) params.set('search', searchQuery);
     if (selectedIndex) params.set('index', selectedIndex);
-    router.push(`/tickers?${params.toString()}`, { scroll: false });
-  }, [searchQuery, selectedIndex, router]);
+    if (itemsPerPage !== DEFAULT_ITEMS_PER_PAGE) params.set('page_size', String(itemsPerPage));
+    if (sortBy !== 'symbol') params.set('sort_by', sortBy);
+    if (sortOrder !== 'asc') params.set('sort_order', sortOrder);
+    const queryString = params.toString();
+    router.push(`/tickers${queryString ? `?${queryString}` : ''}`, { scroll: false });
+  }, [searchQuery, selectedIndex, itemsPerPage, sortBy, sortOrder, router]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,19 +103,34 @@ function TickersContent() {
     setPage(0);
   };
 
-  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  const handleItemsPerPageChange = (value: number) => {
+    setItemsPerPage(value);
+    setPage(0);
+  };
+
+  const handleSort = (field: SortField) => {
+    setPage(0);
+    if (sortBy === field) {
+      setSortOrder((currentOrder) => (currentOrder === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setSortBy(field);
+    setSortOrder('asc');
+  };
+
+  const totalPages = Math.ceil(total / itemsPerPage);
 
   return (
     <ControlShell
       activeSection="tickers"
-      title="Ticker Reports"
+      title="Ticker List"
       subtitle="Browse and search market symbols with fast filters and paginated results."
       actionLabel="Back to Dashboard"
       actionHref="/"
     >
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="hud-pill">Universe query</span>
           <p className="text-sm text-gemini-text-secondary">
             {isLoading ? 'Loading symbols...' : `${total.toLocaleString()} symbols indexed`}
           </p>
@@ -136,6 +170,21 @@ function TickersContent() {
                 ))}
               </select>
             </div>
+
+            <div className="w-full md:w-36">
+              <select
+                value={itemsPerPage}
+                onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
+                className="gemini-select"
+                aria-label="Items per page"
+              >
+                {ITEMS_PER_PAGE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / page
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -158,8 +207,34 @@ function TickersContent() {
                 <table className="gemini-table min-w-full">
                   <thead className="bg-gemini-bg-secondary/85">
                     <tr>
-                      <th className="px-6 py-4">Symbol</th>
-                      <th className="px-6 py-4">Name</th>
+                      <th className="px-6 py-4">
+                        <button
+                          type="button"
+                          onClick={() => handleSort('symbol')}
+                          className="inline-flex items-center gap-1"
+                        >
+                          Symbol
+                          {sortBy === 'symbol' && (
+                            <span className="text-xs text-gemini-text-secondary">
+                              {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}
+                            </span>
+                          )}
+                        </button>
+                      </th>
+                      <th className="px-6 py-4">
+                        <button
+                          type="button"
+                          onClick={() => handleSort('name')}
+                          className="inline-flex items-center gap-1"
+                        >
+                          Name
+                          {sortBy === 'name' && (
+                            <span className="text-xs text-gemini-text-secondary">
+                              {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}
+                            </span>
+                          )}
+                        </button>
+                      </th>
                       <th className="px-6 py-4">Sector</th>
                       <th className="px-6 py-4">Industry</th>
                       <th className="px-6 py-4">Index</th>
@@ -199,7 +274,7 @@ function TickersContent() {
             {totalPages > 1 && (
               <div className="flex flex-col items-start justify-between gap-3 md:flex-row md:items-center">
                 <p className="text-sm text-gemini-text-secondary">
-                  Showing {page * ITEMS_PER_PAGE + 1} to {Math.min((page + 1) * ITEMS_PER_PAGE, total)} of {total} results
+                  Showing {page * itemsPerPage + 1} to {Math.min((page + 1) * itemsPerPage, total)} of {total} results
                 </p>
                 <div className="flex gap-2">
                   <button

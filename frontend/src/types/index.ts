@@ -105,11 +105,14 @@ export interface TickersResponse {
 }
 
 export interface TickersQueryParams {
+  offset?: number;
   skip?: number;
   limit?: number;
   search?: string;
   index?: string;
   sector?: string;
+  sort_by?: 'symbol' | 'name';
+  sort_order?: 'asc' | 'desc';
 }
 
 // ============ Ticker Details ============

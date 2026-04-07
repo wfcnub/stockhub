@@ -17,6 +17,9 @@ def get_tickers(
     sector: Optional[str] = Query(None, description="Filter by sector"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    skip: Optional[int] = Query(None, ge=0, description="Alias for offset"),
+    sort_by: str = Query("symbol", description="Sort field: symbol or name"),
+    sort_order: str = Query("asc", description="Sort order: asc or desc"),
     db: Session = Depends(get_db)
 ):
     """
@@ -44,11 +47,30 @@ def get_tickers(
             )
         )
 
+    sort_field = sort_by.lower()
+    sort_direction = sort_order.lower()
+
+    if sort_field not in {"symbol", "name"}:
+        raise HTTPException(status_code=400, detail="Invalid sort_by. Use 'symbol' or 'name'.")
+
+    if sort_direction not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="Invalid sort_order. Use 'asc' or 'desc'.")
+
+    sort_column = Ticker.symbol if sort_field == "symbol" else Ticker.name
+    primary_sort = sort_column.desc() if sort_direction == "desc" else sort_column.asc()
+
+    if sort_field == "name":
+        query = query.order_by(primary_sort, Ticker.symbol.asc())
+    else:
+        query = query.order_by(primary_sort)
+
+    effective_offset = skip if skip is not None else offset
+
     # Get total count before pagination
     total = query.count()
 
     # Apply pagination
-    tickers = query.offset(offset).limit(limit).all()
+    tickers = query.offset(effective_offset).limit(limit).all()
 
     return {
         "total": total,
