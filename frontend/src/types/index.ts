@@ -1,4 +1,4 @@
-// API Contract v0.2.0 Types
+// API Contract v0.2.4 Types
 
 // ============ Platform Statistics ============
 
@@ -22,11 +22,38 @@ export interface Index {
   id: number;
   code: string;
   name: string;
+  yfinance_suffix?: string | null;
+  ticker_count?: number;
   is_active: boolean;
+  last_synced_at?: string | null;
+  created_at?: string | null;
 }
 
 export interface IndexesResponse {
+  total?: number;
   data: Index[];
+}
+
+export interface CreateIndexRequest {
+  code: string;
+  name: string;
+  yfinance_suffix?: string;
+}
+
+export interface UpdateIndexRequest {
+  code?: string;
+  name?: string;
+  yfinance_suffix?: string;
+  is_active?: boolean;
+}
+
+export interface DeleteIndexResponse {
+  deleted: boolean;
+  hard_delete: boolean;
+  id: number;
+  code: string;
+  is_active?: boolean;
+  message: string;
 }
 
 // ============ Sync Operations ============
@@ -35,16 +62,24 @@ export interface SyncStartRequest {
   index_code: string;
 }
 
+export type SyncStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+
 export interface SyncStartResponse {
   sync_id: string;
   index_code: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  status: SyncStatus;
+  message: string;
+}
+
+export interface SyncStopResponse {
+  sync_id: string;
+  status: SyncStatus;
   message: string;
 }
 
 export interface SyncProgress {
   sync_id: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  status: SyncStatus;
   progress: {
     total_tickers: number;
     processed_tickers: number;

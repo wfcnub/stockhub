@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import tickers, prices, indicators, sync, stats
+from app.routers import tickers, prices, indicators, sync, stats, indexes
 
 app = FastAPI(
     title="StockHub API",
@@ -20,6 +20,7 @@ app.add_middleware(
 
 # API v1 endpoints
 app.include_router(stats.router, prefix="/api/v1", tags=["stats"])
+app.include_router(indexes.router, prefix="/api/v1", tags=["indexes"])
 app.include_router(tickers.router, prefix="/api/v1", tags=["tickers"])
 app.include_router(prices.router, prefix="/api/v1", tags=["prices"])
 app.include_router(indicators.router, prefix="/api/v1", tags=["indicators"])

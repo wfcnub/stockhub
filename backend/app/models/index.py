@@ -6,12 +6,13 @@ from app.db.database import Base
 
 
 class Index(Base):
-    """Model for market indexes (e.g., IDX - Jakarta Composite Index)"""
+    """Model for market indexes (e.g., JCI - Jakarta Composite Index)"""
     __tablename__ = "indexes"
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(20), unique=True, nullable=False)  # e.g., "IDX"
+    code = Column(String(20), unique=True, nullable=False)  # e.g., "JCI"
     name = Column(String(255), nullable=False)  # e.g., "Jakarta Composite Index"
+    yfinance_suffix = Column(String(10), default="")  # e.g., ".JK" for IDX
     ticker_count = Column(Integer, default=0)  # Number of tickers in index
     is_active = Column(Boolean, default=True)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)

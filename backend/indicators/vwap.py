@@ -72,7 +72,7 @@ class VWAP(BaseIndicator):
         for idx in range(len(df)):
             if not pd.isna(vwap.iloc[idx]) and not np.isinf(vwap.iloc[idx]):
                 results.append(IndicatorResult(
-                    date=str(df.iloc[idx]['date']),
+                    date=df.iloc[idx]['date'],
                     value=float(vwap.iloc[idx]),
                     metadata={
                         "typical_price": float(typical_price.iloc[idx]),

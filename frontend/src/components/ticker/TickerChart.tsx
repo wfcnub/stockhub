@@ -18,11 +18,15 @@ interface TickerChartProps {
   onMAChange: (periods: number[]) => void;
 }
 
-function getMAColor(period: number): string {
-  if (period === 20) return 'rgb(var(--gemini-accent-purple))';
-  if (period === 50) return 'rgb(var(--gemini-accent-orange))';
-  if (period === 200) return 'rgb(var(--gemini-accent-green))';
-  return 'rgb(var(--gemini-accent-blue))';
+function getMAColor(period: number, themeColors: ReturnType<typeof getChartThemeColors>): string {
+  if (period === 20) return themeColors.accentPurple;
+  if (period === 50) return themeColors.accentOrange;
+  if (period === 200) return themeColors.positive;
+  return themeColors.accentBlue;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 export function TickerChart({
@@ -38,6 +42,7 @@ export function TickerChart({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const { resolvedTheme } = useTheme();
+  const maThemeColors = getChartThemeColors();
   const seriesRef = useRef<{
     candlestick: ISeriesApi<'Candlestick'> | null;
     volume: ISeriesApi<'Histogram'> | null;
@@ -52,11 +57,6 @@ export function TickerChart({
     if (!chartContainerRef.current || !data.length) return;
 
     const themeColors = getChartThemeColors();
-
-    // Clear previous chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-    }
 
     // Create chart
     const chart = createChart(chartContainerRef.current, {
@@ -118,24 +118,32 @@ export function TickerChart({
     seriesRef.current.ma.clear();
     selectedMA.forEach((period) => {
       const maSeries = chart.addLineSeries({
-        color: getMAColor(period),
+        color: getMAColor(period, themeColors),
         lineWidth: 2,
       });
       seriesRef.current.ma.set(period, maSeries);
     });
 
     // Transform data for chart
-    const candleData = data.map((d) => ({
-      time: d.date as string,
-      open: d.price.open,
-      high: d.price.high,
-      low: d.price.low,
-      close: d.price.close,
-    }));
+    const candleData = data
+      .filter(
+        (d) =>
+          isFiniteNumber(d.price.open) &&
+          isFiniteNumber(d.price.high) &&
+          isFiniteNumber(d.price.low) &&
+          isFiniteNumber(d.price.close)
+      )
+      .map((d) => ({
+        time: d.date as string,
+        open: d.price.open,
+        high: d.price.high,
+        low: d.price.low,
+        close: d.price.close,
+      }));
 
     const volumeData = data.map((d) => ({
       time: d.date as string,
-      value: d.price.volume,
+      value: isFiniteNumber(d.price.volume) ? d.price.volume : 0,
       color: d.price.close >= d.price.open ? themeColors.volumeUp : themeColors.volumeDown,
     }));
 
@@ -147,12 +155,17 @@ export function TickerChart({
       const maKey = `ma_${period}` as keyof typeof data[0]['indicators'];
       const maSeries = seriesRef.current.ma.get(period);
       if (maSeries) {
-        const maData = data
-          .filter((d) => d.indicators[maKey] !== undefined)
-          .map((d) => ({
+        const maData = data.flatMap((d) => {
+          const maValue = d.indicators[maKey];
+          if (!isFiniteNumber(maValue)) {
+            return [];
+          }
+
+          return [{
             time: d.date as string,
-            value: d.indicators[maKey] as number,
-          }));
+            value: maValue,
+          }];
+        });
         maSeries.setData(maData);
       }
     });
@@ -170,6 +183,12 @@ export function TickerChart({
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (chartRef.current === chart) {
+        chartRef.current = null;
+      }
+      seriesRef.current.candlestick = null;
+      seriesRef.current.volume = null;
+      seriesRef.current.ma.clear();
       chart.remove();
     };
   }, [data, selectedMA, resolvedTheme]);
@@ -196,7 +215,15 @@ export function TickerChart({
   if (error) {
     return (
       <div className="hud-panel p-4">
-        <p className="text-gemini-accent-red">{error}</p>
+        <div
+          className="inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1.5 text-xs font-semibold text-gemini-accent-red"
+          title={error}
+        >
+          <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="truncate">Failed to load chart data</span>
+        </div>
       </div>
     );
   }
@@ -245,7 +272,7 @@ export function TickerChart({
                 }`}
                 style={{
                   borderBottom: selectedMA.includes(ma.value)
-                    ? `2px solid ${getMAColor(ma.value)}`
+                    ? `2px solid ${getMAColor(ma.value, maThemeColors)}`
                     : 'none',
                 }}
               >
@@ -268,7 +295,7 @@ export function TickerChart({
             >
               <div
                 className="w-3 h-0.5 rounded"
-                style={{ backgroundColor: getMAColor(period) }}
+                style={{ backgroundColor: getMAColor(period, maThemeColors) }}
               />
               <span>MA {period}</span>
             </div>

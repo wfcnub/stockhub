@@ -21,10 +21,6 @@ export function RSIChart({ data, height = 150 }: IndicatorsChartProps) {
 
     const themeColors = getChartThemeColors();
 
-    if (chartRef.current) {
-      chartRef.current.remove();
-    }
-
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: themeColors.background },
@@ -99,6 +95,9 @@ export function RSIChart({ data, height = 150 }: IndicatorsChartProps) {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (chartRef.current === chart) {
+        chartRef.current = null;
+      }
       chart.remove();
     };
   }, [data, height, resolvedTheme]);
@@ -126,10 +125,6 @@ export function MACDChart({ data, height = 150 }: IndicatorsChartProps) {
     if (!chartContainerRef.current || !data.length) return;
 
     const themeColors = getChartThemeColors();
-
-    if (chartRef.current) {
-      chartRef.current.remove();
-    }
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -211,6 +206,9 @@ export function MACDChart({ data, height = 150 }: IndicatorsChartProps) {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (chartRef.current === chart) {
+        chartRef.current = null;
+      }
       chart.remove();
     };
   }, [data, height, resolvedTheme]);

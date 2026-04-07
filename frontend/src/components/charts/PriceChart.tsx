@@ -29,11 +29,6 @@ export default function PriceChart({ data, symbol }: PriceChartProps) {
 
     const themeColors = getChartThemeColors();
 
-    // Clear previous chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-    }
-
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: themeColors.background },
@@ -89,6 +84,9 @@ export default function PriceChart({ data, symbol }: PriceChartProps) {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (chartRef.current === chart) {
+        chartRef.current = null;
+      }
       chart.remove();
     };
   }, [data, timeRange, resolvedTheme]);

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import Optional
+import json
 
 from app.db.database import get_db
 from app.models import Ticker, DailyPrice, KeyMetric, Index, TechnicalIndicator
@@ -169,18 +170,26 @@ def get_ticker_chart(
             indicators_by_date[ind.date][f"ma_{ind.window_period}"] = ind.value
         elif ind.indicator_type == "rsi":
             indicators_by_date[ind.date]["rsi_14"] = ind.value
-        elif ind.indicator_type == "macd_line":
-            if "macd" not in indicators_by_date[ind.date]:
-                indicators_by_date[ind.date]["macd"] = {}
-            indicators_by_date[ind.date]["macd"]["value"] = ind.value
-        elif ind.indicator_type == "macd_signal":
-            if "macd" not in indicators_by_date[ind.date]:
-                indicators_by_date[ind.date]["macd"] = {}
-            indicators_by_date[ind.date]["macd"]["signal"] = ind.value
-        elif ind.indicator_type == "macd_histogram":
-            if "macd" not in indicators_by_date[ind.date]:
-                indicators_by_date[ind.date]["macd"] = {}
-            indicators_by_date[ind.date]["macd"]["histogram"] = ind.value
+        elif ind.indicator_type == "macd":
+            # Current storage format: one MACD row with signal/histogram in extra_data JSON.
+            macd_data = {
+                "value": float(ind.value),
+                "signal": None,
+                "histogram": None,
+            }
+
+            if ind.extra_data:
+                try:
+                    extra_data = json.loads(ind.extra_data)
+                    if isinstance(extra_data, dict):
+                        if extra_data.get("signal") is not None:
+                            macd_data["signal"] = float(extra_data["signal"])
+                        if extra_data.get("histogram") is not None:
+                            macd_data["histogram"] = float(extra_data["histogram"])
+                except (TypeError, ValueError):
+                    pass
+
+            indicators_by_date[ind.date]["macd"] = macd_data
 
     # Build chart data
     chart_data = {

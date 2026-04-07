@@ -85,7 +85,7 @@ class RSI(BaseIndicator):
 
             if not np.isnan(rsi_value):
                 results.append(IndicatorResult(
-                    date=str(df.iloc[idx]['date']),
+                    date=df.iloc[idx]['date'],
                     value=float(rsi_value)
                 ))
 

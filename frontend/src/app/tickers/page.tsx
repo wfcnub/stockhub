@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import type { TickerListItem } from '@/types';
-import { getTickers } from '@/lib/api';
+import type { TickerListItem, Index } from '@/types';
+import { getIndexes, getTickers } from '@/lib/api';
 import { ControlShell } from '@/components/layout/ControlShell';
 
 const ITEMS_PER_PAGE = 50;
@@ -17,6 +17,7 @@ function TickersContent() {
   const initialIndex = searchParams.get('index') || '';
   
   const [tickers, setTickers] = useState<TickerListItem[]>([]);
+  const [indexes, setIndexes] = useState<Index[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +50,20 @@ function TickersContent() {
   useEffect(() => {
     fetchTickers();
   }, [fetchTickers]);
+
+  useEffect(() => {
+    const fetchIndexes = async () => {
+      try {
+        const data = await getIndexes(true);
+        setIndexes(data);
+      } catch {
+        // Keep the index filter available with the default option even if index loading fails.
+        setIndexes([]);
+      }
+    };
+
+    void fetchIndexes();
+  }, []);
 
   // Update URL params when filters change
   useEffect(() => {
@@ -114,7 +129,11 @@ function TickersContent() {
                 className="gemini-select"
               >
                 <option value="">All Indexes</option>
-                <option value="IDX">IDX</option>
+                {indexes.map((index) => (
+                  <option key={index.id} value={index.code}>
+                    {index.code}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

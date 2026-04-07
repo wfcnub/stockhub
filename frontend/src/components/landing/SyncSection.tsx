@@ -2,13 +2,24 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import type { Index, SyncProgress } from '@/types';
-import { getIndexes, startSync, getSyncProgress } from '@/lib/api';
+import { getIndexes, startSync, getSyncProgress, stopSync } from '@/lib/api';
+
+const ACTIVE_SYNC_STORAGE_KEY = 'stockhub.active-sync-id';
+
+const isTerminalStatus = (status: SyncProgress['status']) => {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+};
+
+const isNotFoundError = (error: unknown) => {
+  return error instanceof Error && error.message.includes('404');
+};
 
 export function SyncSection() {
   const [indexes, setIndexes] = useState<Index[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncId, setSyncId] = useState<string | null>(null);
@@ -16,10 +27,12 @@ export function SyncSection() {
   useEffect(() => {
     const fetchIndexes = async () => {
       try {
-        const data = await getIndexes();
+        const data = await getIndexes(true);
         setIndexes(data);
-        if (data.length > 0 && data[0].is_active) {
-          setSelectedIndex(data[0].code);
+
+        const firstActiveIndex = data.find((idx) => idx.is_active);
+        if (firstActiveIndex) {
+          setSelectedIndex(firstActiveIndex.code);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load indexes');
@@ -37,16 +50,77 @@ export function SyncSection() {
       const progress = await getSyncProgress(currentSyncId);
       setSyncProgress(progress);
 
-      if (progress.status === 'completed' || progress.status === 'failed') {
+      if (isTerminalStatus(progress.status)) {
         setIsSyncing(false);
+        setSyncId(null);
+        localStorage.removeItem(ACTIVE_SYNC_STORAGE_KEY);
+
         if (progress.status === 'failed') {
           setError('Sync failed. Please try again.');
+        } else {
+          setError(null);
         }
+
+        return false;
       }
+
+      setIsSyncing(true);
+      return true;
     } catch (err) {
       console.error('Error polling progress:', err);
+
+      // Clean up stale sync id if backend no longer knows this job.
+      if (isNotFoundError(err)) {
+        setIsSyncing(false);
+        setSyncId(null);
+        localStorage.removeItem(ACTIVE_SYNC_STORAGE_KEY);
+        return false;
+      }
+
+      return true;
     }
   }, []);
+
+  const restoreActiveSyncFromServer = useCallback(async () => {
+    try {
+      const activeProgress = await getSyncProgress();
+
+      if (isTerminalStatus(activeProgress.status)) {
+        return false;
+      }
+
+      setSyncId(activeProgress.sync_id);
+      setSyncProgress(activeProgress);
+      setIsSyncing(true);
+      setError(null);
+      localStorage.setItem(ACTIVE_SYNC_STORAGE_KEY, activeProgress.sync_id);
+      return true;
+    } catch (err) {
+      if (!isNotFoundError(err)) {
+        console.error('Error restoring active sync:', err);
+      }
+
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const restoreSyncState = async () => {
+      const activeSyncId = localStorage.getItem(ACTIVE_SYNC_STORAGE_KEY);
+
+      if (activeSyncId) {
+        setSyncId(activeSyncId);
+        const restored = await pollProgress(activeSyncId);
+        if (restored) {
+          return;
+        }
+      }
+
+      await restoreActiveSyncFromServer();
+    };
+
+    restoreSyncState();
+  }, [pollProgress, restoreActiveSyncFromServer]);
 
   useEffect(() => {
     if (!isSyncing || !syncId) return;
@@ -68,12 +142,58 @@ export function SyncSection() {
     try {
       const response = await startSync(selectedIndex);
       setSyncId(response.sync_id);
+      localStorage.setItem(ACTIVE_SYNC_STORAGE_KEY, response.sync_id);
+
       // Immediately fetch progress after starting
       const progress = await getSyncProgress(response.sync_id);
       setSyncProgress(progress);
+
+      if (isTerminalStatus(progress.status)) {
+        setIsSyncing(false);
+        setSyncId(null);
+        localStorage.removeItem(ACTIVE_SYNC_STORAGE_KEY);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start sync');
       setIsSyncing(false);
+      setSyncId(null);
+      localStorage.removeItem(ACTIVE_SYNC_STORAGE_KEY);
+    }
+  };
+
+  const handleStopSync = async () => {
+    if (!syncId) return;
+
+    setIsStopping(true);
+    setError(null);
+
+    try {
+      const response = await stopSync(syncId);
+      setIsSyncing(false);
+      setSyncId(null);
+      localStorage.removeItem(ACTIVE_SYNC_STORAGE_KEY);
+
+      try {
+        const progress = await getSyncProgress(response.sync_id);
+        setSyncProgress(progress);
+      } catch {
+        setSyncProgress((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            status: 'cancelled',
+            progress: {
+              ...prev.progress,
+              current_ticker: null,
+              estimated_remaining_seconds: 0,
+            },
+          };
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to stop sync');
+    } finally {
+      setIsStopping(false);
     }
   };
 
@@ -100,7 +220,12 @@ export function SyncSection() {
       <div className="mb-6 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-gemini-accent-orange/15 p-2">
-            <svg className="w-5 h-5 text-gemini-accent-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              className={`w-5 h-5 text-gemini-accent-orange ${isSyncing ? 'animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </div>
@@ -135,28 +260,39 @@ export function SyncSection() {
             className="gemini-select disabled:cursor-not-allowed disabled:opacity-50"
           >
             <option value="">Select an index</option>
-            {indexes
-              .filter((idx) => idx.is_active)
-              .map((idx) => (
-                <option key={idx.code} value={idx.code}>
-                  {idx.name}
-                </option>
-              ))}
+            {indexes.map((idx) => (
+              <option key={idx.code} value={idx.code}>
+                {idx.name}
+              </option>
+            ))}
           </select>
         </div>
 
         <button
-          onClick={handleStartSync}
-          disabled={!selectedIndex || isSyncing}
-          className="gemini-button-primary flex w-full items-center justify-center gap-2"
+          onClick={isSyncing ? handleStopSync : handleStartSync}
+          disabled={isSyncing ? isStopping || !syncId : !selectedIndex}
+          className={`flex w-full items-center justify-center gap-2 ${
+            isSyncing
+              ? 'gemini-button border-gemini-accent-red/70 bg-transparent text-gemini-accent-red hover:bg-gemini-accent-red/10'
+              : 'gemini-button-primary'
+          }`}
         >
           {isSyncing ? (
-            <>
-              <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span>Syncing...</span>
-            </>
+            isStopping ? (
+              <>
+                <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Stopping...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6h12v12H6z" />
+                </svg>
+                <span>Stop Sync</span>
+              </>
+            )
           ) : (
             <>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -224,6 +360,20 @@ export function SyncSection() {
               <p className="font-medium text-gemini-accent-green">Sync completed successfully</p>
               <p className="text-sm text-gemini-text-secondary">
                 Processed {syncProgress.progress.total_tickers} tickers.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {syncProgress?.status === 'cancelled' && (
+          <div className="flex items-center gap-2 rounded-gemini border border-gemini-accent-orange/30 bg-gemini-accent-orange/10 p-4">
+            <svg className="w-5 h-5 text-gemini-accent-orange flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6h12v12H6z" />
+            </svg>
+            <div>
+              <p className="font-medium text-gemini-accent-orange">Sync stopped</p>
+              <p className="text-sm text-gemini-text-secondary">
+                Processed {syncProgress.progress.processed_tickers} / {syncProgress.progress.total_tickers} tickers.
               </p>
             </div>
           </div>

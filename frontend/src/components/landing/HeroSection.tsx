@@ -47,19 +47,6 @@ export function HeroSection() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="hud-panel p-6">
-        <div className="flex items-center gap-3 rounded-gemini border border-gemini-accent-red/30 bg-gemini-accent-red/10 p-4 text-gemini-accent-red">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p>{error}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="hud-panel p-6 md:p-7">
       <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -69,25 +56,67 @@ export function HeroSection() {
           <p className="mt-2 text-sm text-gemini-text-secondary">
             Track core market metrics and recent sync status for your indexed symbols.
           </p>
+
+          {error ? (
+            <div className="mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1 text-xs font-medium text-gemini-accent-red">
+              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="truncate" title={error}>Failed to refresh stats</span>
+            </div>
+          ) : null}
         </div>
-        <span className="hud-pill">
-          Last sync: {stats?.last_global_sync ? formatDate(stats.last_global_sync) : '—'}
+        <span
+          className={error
+            ? 'inline-flex items-center rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1.5 text-xs font-medium text-gemini-accent-red'
+            : 'hud-pill'}
+          title={error || undefined}
+        >
+          Last sync: {error ? 'Failed' : (stats?.last_global_sync ? formatDate(stats.last_global_sync) : '—')}
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="hud-subpanel p-4">
           <p className="text-sm text-gemini-text-secondary">Indexes</p>
-          <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">{stats?.total_indexes ?? '—'}</p>
+          {error ? (
+            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-2.5 py-1 text-xs font-semibold text-gemini-accent-red" title={error}>
+              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="truncate">Failed to load</span>
+            </div>
+          ) : (
+            <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">{stats?.total_indexes ?? '—'}</p>
+          )}
         </div>
         
         <div className="hud-subpanel p-4">
           <p className="text-sm text-gemini-text-secondary">Tickers</p>
-          <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">{stats?.total_tickers?.toLocaleString() ?? '—'}</p>
+          {error ? (
+            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-2.5 py-1 text-xs font-semibold text-gemini-accent-red" title={error}>
+              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="truncate">Failed to load</span>
+            </div>
+          ) : (
+            <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">{stats?.total_tickers?.toLocaleString() ?? '—'}</p>
+          )}
         </div>
       </div>
 
-      {stats?.indexes && stats.indexes.length > 0 && (
+      {error ? (
+        <div className="mt-5 border-t border-gemini-surface-border pt-5">
+          <p className="mb-3 text-sm text-gemini-text-secondary">Tracked indexes</p>
+          <div className="inline-flex max-w-full items-center gap-2 rounded-gemini border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-2 text-sm text-gemini-accent-red">
+            <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="truncate" title={error}>Unable to load index details</span>
+          </div>
+        </div>
+      ) : stats?.indexes && stats.indexes.length > 0 ? (
         <div className="mt-5 border-t border-gemini-surface-border pt-5">
           <p className="mb-3 text-sm text-gemini-text-secondary">Tracked indexes</p>
           <div className="flex flex-wrap gap-2">
@@ -102,7 +131,7 @@ export function HeroSection() {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

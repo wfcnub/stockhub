@@ -84,30 +84,11 @@ export default function TickerDetailPage() {
     );
   }
 
-  if (error) {
-    return (
-      <ControlShell
-        activeSection="analysis"
-        title={`${symbol} Analysis`}
-        subtitle="Unable to load this ticker right now."
-        actionLabel="Back to Tickers"
-        actionHref="/tickers"
-      >
-        <div className="rounded-gemini border border-gemini-accent-red/35 bg-gemini-accent-red/10 p-4">
-          <p className="text-gemini-accent-red">{error}</p>
-          <Link href="/tickers" className="mt-2 inline-block text-gemini-accent-blue hover:underline">
-              ← Back to Tickers
-          </Link>
-        </div>
-      </ControlShell>
-    );
-  }
-
   return (
     <ControlShell
       activeSection="analysis"
       title={`${symbol} Overview`}
-      subtitle="Review valuation metrics, chart structure, and momentum overlays."
+      subtitle={error ? 'Some data could not be loaded. Available modules are still shown below.' : 'Review valuation metrics, chart structure, and momentum overlays.'}
       actionLabel="Back to Tickers"
       actionHref="/tickers"
     >
@@ -123,13 +104,26 @@ export default function TickerDetailPage() {
         </Link>
 
         {/* Key Metrics */}
-        {ticker && (
+        {error ? (
+          <div className="rounded-gemini border border-gemini-accent-red/35 bg-gemini-accent-red/10 p-4">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1 text-xs font-medium text-gemini-accent-red" title={error}>
+              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="truncate">Failed to load ticker profile</span>
+            </div>
+          </div>
+        ) : ticker ? (
           <KeyMetrics
             symbol={ticker.symbol}
             name={ticker.name}
             sector={ticker.sector}
             metrics={ticker.key_metrics}
           />
+        ) : (
+          <div className="rounded-gemini border border-gemini-surface-border bg-gemini-bg-secondary/45 p-4 text-sm text-gemini-text-secondary">
+            Ticker profile is unavailable.
+          </div>
         )}
 
         {/* Price Chart with MA */}

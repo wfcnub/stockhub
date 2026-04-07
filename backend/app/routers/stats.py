@@ -40,30 +40,9 @@ def get_platform_stats(db: Session = Depends(get_db)):
             {
                 "code": idx.code,
                 "name": idx.name,
+                "yfinance_suffix": idx.yfinance_suffix or "",
                 "ticker_count": idx.ticker_count,
                 "last_sync": idx.last_synced_at.isoformat() if idx.last_synced_at else None
-            }
-            for idx in indexes
-        ]
-    }
-
-
-@router.get("/indexes")
-def list_indexes(db: Session = Depends(get_db)):
-    """
-    List available indexes for sync selection dropdown.
-
-    Returns index id, code, name, and is_active status.
-    """
-    indexes = db.query(Index).all()
-
-    return {
-        "data": [
-            {
-                "id": idx.id,
-                "code": idx.code,
-                "name": idx.name,
-                "is_active": idx.is_active
             }
             for idx in indexes
         ]

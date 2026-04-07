@@ -1,15 +1,16 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import date
 import pandas as pd
 
 
 @dataclass
 class IndicatorResult:
     """Result of a technical indicator calculation for a single date"""
-    date: str
+    date: date
     value: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {

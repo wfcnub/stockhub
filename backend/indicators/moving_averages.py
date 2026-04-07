@@ -49,7 +49,7 @@ class SMA(BaseIndicator):
         for idx in range(len(df)):
             if not pd.isna(sma.iloc[idx]):
                 results.append(IndicatorResult(
-                    date=str(df.iloc[idx]['date']),
+                    date=df.iloc[idx]['date'],
                     value=float(sma.iloc[idx])
                 ))
 
@@ -104,7 +104,7 @@ class EMA(BaseIndicator):
             # EMA needs at least 'window' periods for a stable calculation
             if idx >= self.window - 1:
                 results.append(IndicatorResult(
-                    date=str(df.iloc[idx]['date']),
+                    date=df.iloc[idx]['date'],
                     value=float(ema.iloc[idx])
                 ))
 

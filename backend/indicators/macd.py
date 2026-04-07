@@ -73,7 +73,7 @@ class MACD(BaseIndicator):
         for idx in range(len(df)):
             if idx >= min_idx and not pd.isna(macd_line.iloc[idx]):
                 results.append(IndicatorResult(
-                    date=str(df.iloc[idx]['date']),
+                    date=df.iloc[idx]['date'],
                     value=float(macd_line.iloc[idx]),
                     metadata={
                         "signal": float(signal_line.iloc[idx]),

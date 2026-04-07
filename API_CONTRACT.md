@@ -1,4 +1,4 @@
-# StockHub API Contract (v0.2.0)
+# StockHub API Contract (v0.2.4)
 
 > **Source of Truth** - This document defines the API contract. Backend must implement these endpoints. Frontend must consume these endpoints.
 
@@ -11,12 +11,17 @@
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/stats` | GET | Platform statistics for the Hero section |
-| `/indexes` | GET | List available indexes for sync selection |
+| `/indexes` | GET | List all indexes with optional filtering |
+| `/indexes` | POST | Create a new index |
+| `/indexes/{index_id}` | GET | Get a single index by ID |
+| `/indexes/{index_id}` | PATCH | Update an index (partial update) |
+| `/indexes/{index_id}` | DELETE | Delete an index (soft or hard delete) |
 | `/tickers` | GET | List tickers with pagination and search |
 | `/tickers/{symbol}` | GET | Ticker profile and the latest fundamental metrics |
 | `/tickers/{symbol}/chart` | GET | Unified Price + Technical Indicator historical data |
 | `/sync/start` | POST | Trigger a background sync job for an index |
 | `/sync/progress` | GET | Poll the real-time progress of a sync job |
+| `/sync/stop` | POST | Stop an active sync job |
 | `/screener` | GET | Predefined stock screeners (e.g., Bullish Divergence) |
 
 ---
@@ -46,23 +51,212 @@ Returns aggregate data for the Landing Page Hero section.
 
 ---
 
-## 2. Index Selection
+## 2. Index Management
 
 ### GET /indexes
 
-Lists available indexes specifically for the sync selection dropdown.
+Lists all indexes with optional filtering.
+
+**Query Parameters:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| is_active | boolean | null | Filter by active status (true/false) |
 
 **Response:**
 ```json
 {
+  "total": 2,
   "data": [
     {
       "id": 1,
       "code": "IDX",
       "name": "Jakarta Composite Index",
-      "is_active": true
+      "yfinance_suffix": ".JK",
+      "ticker_count": 850,
+      "is_active": true,
+      "last_synced_at": "2026-04-06T10:30:00Z",
+      "created_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": 2,
+      "code": "LQ45",
+      "name": "LQ45 Index",
+      "yfinance_suffix": "",
+      "ticker_count": 45,
+      "is_active": true,
+      "last_synced_at": null,
+      "created_at": "2026-04-06T12:00:00Z"
     }
   ]
+}
+```
+
+---
+
+### GET /indexes/{index_id}
+
+Get a single index by ID.
+
+**Path Parameters:**
+| Name | Type | Description |
+|------|------|-------------|
+| index_id | integer | Index ID |
+
+**Response:**
+```json
+{
+  "id": 1,
+  "code": "IDX",
+  "name": "Jakarta Composite Index",
+  "yfinance_suffix": ".JK",
+  "ticker_count": 850,
+  "is_active": true,
+  "last_synced_at": "2026-04-06T10:30:00Z",
+  "created_at": "2026-01-01T00:00:00Z"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "detail": "Index with id 999 not found"
+}
+```
+
+---
+
+### POST /indexes
+
+Create a new index.
+
+**Request Body:**
+```json
+{
+  "code": "LQ45",
+  "name": "LQ45 Index",
+  "yfinance_suffix": ".JK"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| code | string | Yes | Unique index code (will be uppercased) |
+| name | string | Yes | Display name |
+| yfinance_suffix | string | No | Yahoo Finance suffix (e.g., ".JK" for IDX) |
+
+**Response (200):**
+```json
+{
+  "id": 2,
+  "code": "LQ45",
+  "name": "LQ45 Index",
+  "yfinance_suffix": ".JK",
+  "ticker_count": 0,
+  "is_active": true,
+  "last_synced_at": null,
+  "created_at": "2026-04-06T12:00:00Z"
+}
+```
+
+**Error Response (400 - Duplicate):**
+```json
+{
+  "detail": "Index with code 'LQ45' already exists"
+}
+```
+
+---
+
+### PATCH /indexes/{index_id}
+
+Update an existing index. Supports partial updates.
+
+**Path Parameters:**
+| Name | Type | Description |
+|------|------|-------------|
+| index_id | integer | Index ID |
+
+**Request Body:**
+```json
+{
+  "code": "IDX",
+  "name": "Updated Index Name",
+  "yfinance_suffix": ".JK",
+  "is_active": false
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| code | string | No | New unique index code (will be uppercased) |
+| name | string | No | New display name |
+| yfinance_suffix | string | No | Yahoo Finance suffix |
+| is_active | boolean | No | Active status |
+
+**Response:**
+```json
+{
+  "id": 1,
+  "code": "IDX",
+  "name": "Updated Index Name",
+  "yfinance_suffix": ".JK",
+  "ticker_count": 850,
+  "is_active": false,
+  "last_synced_at": "2026-04-06T10:30:00Z",
+  "created_at": "2026-01-01T00:00:00Z"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "detail": "Index with id 999 not found"
+}
+```
+
+---
+
+### DELETE /indexes/{index_id}
+
+Delete an index. By default performs a soft delete (sets `is_active=false`).
+
+**Path Parameters:**
+| Name | Type | Description |
+|------|------|-------------|
+| index_id | integer | Index ID |
+
+**Query Parameters:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| hard_delete | boolean | false | Permanently delete the index and all associated tickers |
+
+**Response (Soft Delete):**
+```json
+{
+  "deleted": true,
+  "hard_delete": false,
+  "id": 1,
+  "code": "IDX",
+  "is_active": false,
+  "message": "Index 'IDX' deactivated (soft delete). Use hard_delete=true to permanently remove."
+}
+```
+
+**Response (Hard Delete):**
+```json
+{
+  "deleted": true,
+  "hard_delete": true,
+  "id": 1,
+  "code": "IDX",
+  "message": "Index 'IDX' permanently deleted along with 850 associated tickers"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "detail": "Index with id 999 not found"
 }
 ```
 
@@ -101,6 +295,11 @@ Starts a background sync job for a specific index.
 
 Polls the progress of the active sync job for the UI progress bar.
 
+**Query Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| sync_id | string | No | If omitted, backend returns the latest active sync job |
+
 **Response:**
 ```json
 {
@@ -116,7 +315,27 @@ Polls the progress of the active sync job for the UI progress bar.
 }
 ```
 
-**Status values:** `pending`, `in_progress`, `completed`, `failed`
+**Status values:** `pending`, `in_progress`, `completed`, `failed`, `cancelled`
+
+---
+
+### POST /sync/stop
+
+Stops an active sync job.
+
+**Query Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| sync_id | string | No | If omitted, backend stops the latest active sync job |
+
+**Response:**
+```json
+{
+  "sync_id": "sync_20260401_103000",
+  "status": "cancelled",
+  "message": "Sync stopped successfully"
+}
+```
 
 ---
 
@@ -345,6 +564,7 @@ Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`
 ### Landing Page Components
 - **Hero Section**: Use `GET /stats` for ticker count, indexes count, last global sync
 - **Sync Section**: Use `POST /sync/start` to start sync, `GET /sync/progress` for progress polling
+- **Settings Menu (Index Management)**: Use `POST /indexes` to add index and `DELETE /indexes/{index_id}?hard_delete=true` to permanently delete after confirmation
 
 ### Tickers Page
 - Use `GET /tickers` with `search`, `index`, `sector` filters
@@ -359,6 +579,10 @@ Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 0.2.4 | 2026-04-06 | Added `yfinance_suffix` field to indexes. Added `code` field to `PATCH /indexes/{index_id}` to allow updating index code. Updated all index responses to include `yfinance_suffix`. |
+| 0.2.3 | 2026-04-06 | Removed duplicate `GET /indexes` from stats router (now only available under indexes router). Index management is consolidated in the `/indexes` endpoints. |
+| 0.2.2 | 2026-04-06 | Implemented full Index CRUD API: `GET /indexes`, `GET /indexes/{index_id}`, `POST /indexes`, `PATCH /indexes/{index_id}`, `DELETE /indexes/{index_id}` with soft/hard delete support. Updated response format to include `ticker_count`, `last_synced_at`, `created_at`. Removed assumption notes as endpoints are now implemented. |
+| 0.2.1 | 2026-04-06 | Documented frontend assumption for `POST /indexes` and `DELETE /indexes/{index_code}`; assumed response envelope matches `GET /indexes` |
 | 0.2.0 | 2026-04-02 | Added `/indexes` and `/screener` endpoints, added `industry` field to tickers, expanded key_metrics (pbv, dividend_yield, roe), added `sync_id` and `estimated_remaining_seconds` to sync progress, renamed `ma` to `ma_periods`, added `range` to chart response |
 | 0.1.1 | 2026-04-02 | Simplified sync endpoints, nested price/indicators in chart, streamlined ticker details |
 | 0.1.0 | 2026-04-01 | Initial contract |

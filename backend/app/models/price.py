@@ -11,7 +11,7 @@ class DailyPrice(Base):
         UniqueConstraint('ticker_id', 'date', name='uq_ticker_date'),
     )
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"), nullable=False, index=True)
     date = Column(Date, nullable=False, index=True)
     open = Column(Float)
