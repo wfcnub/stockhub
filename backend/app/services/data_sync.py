@@ -141,7 +141,7 @@ class DataSyncService:
             else:
                 start = '2021-01-01'  # Default start date
 
-            end = datetime.now().strftime('%Y-%m-%d')
+            end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
 
             # Download data with the appropriate suffix
             df = download_stock_data(ticker.symbol, start, end, suffix=suffix)

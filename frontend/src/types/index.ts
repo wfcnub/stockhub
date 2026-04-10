@@ -146,8 +146,11 @@ export interface ChartDataPoint {
     volume: number;
   };
   indicators: {
+    ma_10?: number;
+    ma_15?: number;
     ma_20?: number;
     ma_50?: number;
+    ma_100?: number;
     ma_200?: number;
     rsi_14?: number;
     macd?: {
@@ -166,7 +169,7 @@ export interface ChartDataResponse {
 
 export interface ChartQueryParams {
   range?: '1M' | '3M' | '6M' | '1Y' | '5Y' | 'ALL';
-  ma_periods?: string; // Comma-separated, e.g., "20,50,200"
+  ma_periods?: string; // Comma-separated, e.g., "10,15,20,50,100,200"
 }
 
 // ============ Screener ============
@@ -179,6 +182,52 @@ export interface ScreenerResult {
 export interface ScreenerResponse {
   preset: string;
   results: ScreenerResult[];
+}
+
+// ============ Divergence Detection ============
+
+export type DivergenceType = 'regular' | 'hidden';
+export type DivergenceGrade = 'oversold' | 'neutral';
+export type DivergenceStrategyType = 'BULLISH_CONFIRMED' | 'BULLISH_AGGRESSIVE';
+export type DivergenceLineStyle = 'dashed' | 'dotted';
+
+export interface DivergencePoint {
+  timestamp: number;
+  low: number;
+  rsi_14: number;
+}
+
+export interface DivergenceEvent {
+  strategy_type: DivergenceStrategyType;
+  type: DivergenceType;
+  logic_type: DivergenceType;
+  line_style: DivergenceLineStyle;
+  color_hex: string;
+  grade: DivergenceGrade;
+  confirmation_degree: number;
+  p1: DivergencePoint;
+  p2: DivergencePoint;
+  trough_timestamp: number;
+  confirmation_timestamp: number;
+  signal_timestamp: number;
+  invalidation_level: number | null;
+  action: string;
+}
+
+export interface TickerDivergencesResponse {
+  symbol: string;
+  events: DivergenceEvent[];
+}
+
+export interface DivergenceScreenerItem extends DivergenceEvent {
+  symbol: string;
+  name: string;
+}
+
+export interface DivergenceScreenerResponse {
+  lookback_days: number;
+  count: number;
+  results: DivergenceScreenerItem[];
 }
 
 // ============ Time Range Options ============
@@ -197,7 +246,10 @@ export type TimeRangeValue = typeof TIME_RANGES[number]['value'];
 // ============ MA Period Options ============
 
 export const MA_PERIOD_OPTIONS = [
+  { label: 'MA 10', value: 10 },
+  { label: 'MA 15', value: 15 },
   { label: 'MA 20', value: 20 },
   { label: 'MA 50', value: 50 },
+  { label: 'MA 100', value: 100 },
   { label: 'MA 200', value: 200 },
 ];

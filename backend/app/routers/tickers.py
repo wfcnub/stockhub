@@ -134,8 +134,8 @@ def get_ticker(symbol: str, db: Session = Depends(get_db)):
 @router.get("/{symbol}/chart")
 def get_ticker_chart(
     symbol: str,
-    range: str = Query("1Y", description="Preset range: 1M, 3M, 6M, 1Y, 5Y, ALL"),
-    ma_periods: str = Query("20,50,200", description="Comma-separated MA periods"),
+    range: str = Query("ALL", description="Preset range: 1M, 3M, 6M, 1Y, 5Y, ALL"),
+    ma_periods: str = Query("10,15,20,50,100,200", description="Comma-separated MA periods"),
     db: Session = Depends(get_db)
 ):
     """
@@ -158,7 +158,7 @@ def get_ticker_chart(
         "5Y": 1825,
         "ALL": 3650  # 10 years
     }
-    days = range_map.get(range.upper(), 365)
+    days = range_map.get(range.upper(), 3650)
     start_date = date.today() - timedelta(days=days)
 
     # Get price data

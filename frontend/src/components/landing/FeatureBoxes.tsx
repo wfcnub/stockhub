@@ -8,7 +8,7 @@ export function FeatureBoxes() {
       title: 'Ticker List',
       description: 'Browse every listed symbol with fast symbol, name, and index filters.',
       href: '/tickers',
-      tag: 'Report',
+      tag: 'Up',
       cta: 'Open list',
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -21,7 +21,7 @@ export function FeatureBoxes() {
       title: 'Signal Screener',
       description: 'Detect setups from technical and fundamental criteria in seconds.',
       href: '/screener',
-      tag: 'Upcoming',
+      tag: 'Up',
       cta: 'View module',
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -34,14 +34,14 @@ export function FeatureBoxes() {
 
   const colorClasses = {
     blue: {
-      tag: 'bg-gemini-accent-blue/10 text-gemini-accent-blue border-gemini-accent-blue/20',
+      tag: 'bg-gemini-accent-green/10 text-gemini-accent-green border-gemini-accent-green/20',
       border: 'hover:border-gemini-accent-blue/50',
       iconBg: 'bg-gemini-accent-blue/10',
       icon: 'text-gemini-accent-blue',
       arrow: 'text-gemini-accent-blue',
     },
     purple: {
-      tag: 'bg-gemini-accent-yellow/10 text-gemini-accent-yellow border-gemini-accent-yellow/20',
+      tag: 'bg-gemini-accent-green/10 text-gemini-accent-green border-gemini-accent-green/20',
       border: 'hover:border-gemini-accent-purple/50',
       iconBg: 'bg-gemini-accent-purple/10',
       icon: 'text-gemini-accent-purple',

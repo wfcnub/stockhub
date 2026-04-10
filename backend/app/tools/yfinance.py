@@ -9,6 +9,17 @@ from datetime import datetime
 from curl_cffi import requests
 
 
+def _parse_history_datetime(value: str | datetime | None, fallback: datetime) -> datetime:
+    """Parse date/datetime input for yfinance history calls."""
+    if value is None:
+        return fallback
+    if isinstance(value, datetime):
+        return value
+
+    normalized = value.strip().replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized)
+
+
 def download_stock_data(
     symbol: str,
     start_date: str = None,
@@ -20,9 +31,11 @@ def download_stock_data(
 
     Args:
         symbol (str): The stock symbol (e.g., 'BBCA')
-        start_date (str): The start date for the data in 'YYYY-MM-DD' format
+        start_date (str): The start date for the data in
+                          'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' format
                           If empty, defaults to '2021-01-01'
-        end_date (str): The end date for the data in 'YYYY-MM-DD' format
+        end_date (str): The end date for the data in
+                        'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' format
                         If empty, defaults to now
         suffix (str): The yfinance suffix for the exchange (e.g., '.JK' for IDX)
                       Default is empty string (no suffix)
@@ -35,8 +48,8 @@ def download_stock_data(
     full_symbol = f"{symbol}{suffix}" if suffix else symbol
     ticker = yf.Ticker(full_symbol, session=session)
 
-    start = datetime.strptime(start_date, '%Y-%m-%d') if start_date else datetime.strptime('2021-01-01', '%Y-%m-%d')
-    end = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
+    start = _parse_history_datetime(start_date, datetime.strptime('2021-01-01', '%Y-%m-%d'))
+    end = _parse_history_datetime(end_date, datetime.now())
     data = ticker.history(start=start, end=end)
 
     columns_to_drop = ['Dividends', 'Stock Splits', 'Capital Gains']

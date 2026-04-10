@@ -20,9 +20,13 @@ function TickersContent() {
   const initialSearch = searchParams.get('search') || '';
   const initialIndex = searchParams.get('index') || '';
   const initialPageSizeValue = Number(searchParams.get('page_size'));
-  const initialItemsPerPage = ITEMS_PER_PAGE_OPTIONS.includes(initialPageSizeValue as 10 | 20 | 50)
+  const initialItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === initialPageSizeValue)
     ? initialPageSizeValue
     : DEFAULT_ITEMS_PER_PAGE;
+  const initialPageValue = Number(searchParams.get('page'));
+  const initialPage = Number.isInteger(initialPageValue) && initialPageValue > 0
+    ? initialPageValue - 1
+    : 0;
   const initialSortBy: SortField = searchParams.get('sort_by') === 'name' ? 'name' : 'symbol';
   const initialSortOrder: SortOrder = searchParams.get('sort_order') === 'desc' ? 'desc' : 'asc';
   
@@ -37,7 +41,7 @@ function TickersContent() {
   const [itemsPerPage, setItemsPerPage] = useState(initialItemsPerPage);
   const [sortBy, setSortBy] = useState<SortField>(initialSortBy);
   const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(initialPage);
 
   const fetchTickers = useCallback(async () => {
     setIsLoading(true);
@@ -80,17 +84,34 @@ function TickersContent() {
     void fetchIndexes();
   }, []);
 
-  // Update URL params when filters change
+  // Update URL params when filters/pagination change.
   useEffect(() => {
     const params = new URLSearchParams();
     if (searchQuery) params.set('search', searchQuery);
     if (selectedIndex) params.set('index', selectedIndex);
     if (itemsPerPage !== DEFAULT_ITEMS_PER_PAGE) params.set('page_size', String(itemsPerPage));
+    if (page > 0) params.set('page', String(page + 1));
     if (sortBy !== 'symbol') params.set('sort_by', sortBy);
     if (sortOrder !== 'asc') params.set('sort_order', sortOrder);
+
+    const currentQueryString = searchParams.toString();
     const queryString = params.toString();
-    router.push(`/tickers${queryString ? `?${queryString}` : ''}`, { scroll: false });
-  }, [searchQuery, selectedIndex, itemsPerPage, sortBy, sortOrder, router]);
+
+    if (queryString === currentQueryString) {
+      return;
+    }
+
+    router.replace(`/tickers${queryString ? `?${queryString}` : ''}`, { scroll: false });
+  }, [searchQuery, selectedIndex, itemsPerPage, page, sortBy, sortOrder, router, searchParams]);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    const maxPage = Math.max(0, Math.ceil(total / itemsPerPage) - 1);
+    setPage((currentPage) => (currentPage > maxPage ? maxPage : currentPage));
+  }, [total, itemsPerPage, isLoading]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +125,11 @@ function TickersContent() {
   };
 
   const handleItemsPerPageChange = (value: number) => {
-    setItemsPerPage(value);
+    const nextItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === value)
+      ? value
+      : DEFAULT_ITEMS_PER_PAGE;
+
+    setItemsPerPage(nextItemsPerPage);
     setPage(0);
   };
 

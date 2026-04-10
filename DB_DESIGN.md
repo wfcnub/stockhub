@@ -1,4 +1,4 @@
-# StockHub Database Design (v0.2.2)
+# StockHub Database Design (v1.0.0)
 
 > **Source of Truth** - This document defines the database schema. PostgreSQL is the recommended engine to leverage time-series performance and JSONB support for error logging.
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-StockHub uses a relational schema optimized for financial data. The core shift in v1.1.0 is treating **Key Metrics** as a time-series table to track valuation changes (P/E, Market Cap) over time, rather than just keeping a current snapshot. v0.2.0 expands the schema with full OHLCV data, technical indicators, additional metrics, and enhanced tracking fields.
+StockHub uses a relational schema optimized for financial time-series workloads. **Key Metrics** are modeled as a time-series table to track valuation changes over time (not just the latest snapshot). The v1.0.0 documentation pass confirms alignment with active ORM models, including per-ticker sync health in `sync_status`, full OHLCV history in `prices`, indicator overlays in `technical_indicators`, and batch workflow progress in `sync_jobs`.
 
 ---
 
@@ -89,6 +89,7 @@ FK = Foreign Key    PK = Primary Key
 - `tickers` 1──* `prices` (one ticker has many price records)
 - `tickers` 1──* `key_metrics` (one ticker has many metric records)
 - `tickers` 1──* `technical_indicators` (one ticker has many indicator records)
+- `tickers` 1──1 `sync_status` (one ticker has one sync status row)
 
 ---
 
@@ -117,8 +118,8 @@ Basic information for each listed company.
 |--------|------|-------------|-------------|
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
 | symbol | VARCHAR(20) | UNIQUE, NOT NULL | e.g., "BBCA" |
-| name | VARCHAR(255) | NOT NULL | Company name |
-| index_id | INTEGER | REFERENCES indexes(id) | Foreign key |
+| name | VARCHAR(255) | NULL | Company name |
+| index_id | INTEGER | REFERENCES indexes(id), NOT NULL | Foreign key |
 | sector | VARCHAR(100) | | Business category |
 | industry | VARCHAR(100) | | Industry classification |
 | is_active | BOOLEAN | DEFAULT true | Soft delete flag |
@@ -131,15 +132,16 @@ Historical OHLCV data with full price details.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| id | BIGSERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | REFERENCES tickers(id) ON DELETE CASCADE | Foreign key |
+| id | SERIAL | PRIMARY KEY | Auto-generated ID |
+| ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
 | date | DATE | NOT NULL | Trading day |
-| open | DECIMAL(18,4) | NOT NULL | Opening price |
-| high | DECIMAL(18,4) | NOT NULL | Daily high |
-| low | DECIMAL(18,4) | NOT NULL | Daily low |
-| close | DECIMAL(18,4) | NOT NULL | Closing price |
-| volume | BIGINT | NOT NULL | Units traded |
-| adj_close | DECIMAL(18,4) | | Adjusted closing price |
+| open | FLOAT | NULL | Opening price |
+| high | FLOAT | NULL | Daily high |
+| low | FLOAT | NULL | Daily low |
+| close | FLOAT | NOT NULL | Closing price |
+| volume | BIGINT | NULL | Units traded |
+| adj_close | FLOAT | NULL | Adjusted closing price |
+| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
 
 **Constraint:** `UNIQUE (ticker_id, date)` — ensures one price record per ticker per day.
 
@@ -151,17 +153,19 @@ Historical fundamental data for valuation tracking.
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | id | BIGSERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | REFERENCES tickers(id) ON DELETE CASCADE | Foreign key |
+| ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
 | observation_date | DATE | NOT NULL | Date metric was recorded |
 | market_cap | BIGINT | | Valuation on that date |
-| pe_ratio | DECIMAL(10,4) | | Price-to-earnings ratio |
-| pbv | DECIMAL(10,4) | | Price-to-book value |
-| dividend_yield | DECIMAL(6,4) | | Dividend yield percentage |
-| eps | DECIMAL(18,4) | | Earnings per share |
-| roe | DECIMAL(8,4) | | Return on equity |
+| pe_ratio | FLOAT | | Price-to-earnings ratio |
+| pbv | FLOAT | | Price-to-book value |
+| dividend_yield | FLOAT | | Dividend yield percentage |
+| eps | FLOAT | | Earnings per share |
+| roe | FLOAT | | Return on equity |
 | fiscal_year | INTEGER | | e.g., 2026 |
 | fiscal_quarter | INTEGER | | Q1, Q2, Q3, Q4 |
 | last_updated | TIMESTAMP | DEFAULT NOW() | Record update time |
+
+**Constraint:** `UNIQUE (ticker_id, observation_date)` — ensures one metrics snapshot per ticker per observation date.
 
 ---
 
@@ -170,8 +174,8 @@ Stores technical indicator values used by chart overlays and momentum panels.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| id | BIGSERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | REFERENCES tickers(id) | Foreign key |
+| id | SERIAL | PRIMARY KEY | Auto-generated ID |
+| ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
 | date | DATE | NOT NULL | Trading day |
 | indicator_type | VARCHAR(30) | NOT NULL | e.g., sma, ema, rsi, macd |
 | window_period | INTEGER | NULL | For windowed indicators (e.g., SMA 20, RSI 14) |
@@ -183,20 +187,39 @@ Stores technical indicator values used by chart overlays and momentum panels.
 
 ---
 
-### 6. sync_jobs
+### 6. sync_status
+Tracks last per-ticker synchronization health/state.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| id | SERIAL | PRIMARY KEY | Auto-generated ID |
+| ticker_id | INTEGER | UNIQUE, REFERENCES tickers(id), NOT NULL | One row per ticker |
+| last_sync_date | DATE | NULL | Last date of price data synced |
+| last_sync_timestamp | TIMESTAMP | NULL | Last sync attempt timestamp |
+| status | VARCHAR(20) | DEFAULT 'pending' | `pending`, `syncing`, `completed`, `error` |
+| error_message | VARCHAR(500) | NULL | Last sync error message |
+| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
+| updated_at | TIMESTAMP | NULL | Last update timestamp |
+
+---
+
+### 7. sync_jobs
 Tracks batch operations for the landing page progress UI.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
 | sync_id | VARCHAR(100) | UNIQUE, NOT NULL | Unique job identifier |
-| index_id | INTEGER | REFERENCES indexes(id) | Foreign key to index |
-| status | VARCHAR(20) | NOT NULL | pending, in_progress, completed, failed |
+| index_id | INTEGER | REFERENCES indexes(id), NOT NULL | Foreign key to index |
+| status | VARCHAR(20) | NOT NULL | pending, in_progress, running (legacy), completed, failed, cancelled |
 | total_tickers | INTEGER | DEFAULT 0 | Total tickers in batch |
 | processed_tickers | INTEGER | DEFAULT 0 | Count for progress bar |
 | current_ticker | VARCHAR(20) | | Currently processing ticker |
 | started_at | TIMESTAMP | DEFAULT NOW() | Job start time |
 | completed_at | TIMESTAMP | | Job completion time |
+| error_message | VARCHAR(500) | NULL | Error details if job fails/stops |
+
+**Status compatibility note:** runtime rows may still contain legacy `running`; API responses normalize that value to `in_progress`.
 
 ---
 
@@ -230,8 +253,8 @@ CREATE TABLE indexes (
 CREATE TABLE tickers (
     id SERIAL PRIMARY KEY,
     symbol VARCHAR(20) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    index_id INTEGER REFERENCES indexes(id),
+    name VARCHAR(255),
+    index_id INTEGER NOT NULL REFERENCES indexes(id),
     sector VARCHAR(100),
     industry VARCHAR(100),
     is_active BOOLEAN DEFAULT true,
@@ -240,37 +263,39 @@ CREATE TABLE tickers (
 
 -- 3. Prices (Core Time-Series data for charts)
 CREATE TABLE prices (
-    id BIGSERIAL PRIMARY KEY,
-    ticker_id INTEGER REFERENCES tickers(id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY,
+    ticker_id INTEGER NOT NULL REFERENCES tickers(id),
     date DATE NOT NULL,
-    open DECIMAL(18,4) NOT NULL,
-    high DECIMAL(18,4) NOT NULL,
-    low DECIMAL(18,4) NOT NULL,
-    close DECIMAL(18,4) NOT NULL,
-    volume BIGINT NOT NULL,
-    adj_close DECIMAL(18,4),
+    open FLOAT,
+    high FLOAT,
+    low FLOAT,
+    close FLOAT NOT NULL,
+    volume BIGINT,
+    adj_close FLOAT,
+    created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE (ticker_id, date)
 );
 
 -- 4. Key Metrics (Revised to Time-Series for historical valuation)
 CREATE TABLE key_metrics (
     id BIGSERIAL PRIMARY KEY,
-    ticker_id INTEGER REFERENCES tickers(id) ON DELETE CASCADE,
+    ticker_id INTEGER NOT NULL REFERENCES tickers(id),
     observation_date DATE NOT NULL,
     market_cap BIGINT,
-    pe_ratio DECIMAL(10,4),
-    pbv DECIMAL(10,4),
-    dividend_yield DECIMAL(6,4),
-    eps DECIMAL(18,4),
-    roe DECIMAL(8,4),
+    pe_ratio FLOAT,
+    pbv FLOAT,
+    dividend_yield FLOAT,
+    eps FLOAT,
+    roe FLOAT,
     fiscal_year INTEGER,
     fiscal_quarter INTEGER,
-    last_updated TIMESTAMP DEFAULT NOW()
+    last_updated TIMESTAMP DEFAULT NOW(),
+    UNIQUE (ticker_id, observation_date)
 );
 
 -- 5. Technical Indicators (Time-Series for chart overlays)
 CREATE TABLE technical_indicators (
-    id BIGSERIAL PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     ticker_id INTEGER NOT NULL REFERENCES tickers(id),
     date DATE NOT NULL,
     indicator_type VARCHAR(30) NOT NULL,
@@ -280,17 +305,30 @@ CREATE TABLE technical_indicators (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- 6. Sync Jobs (For Landing Page progress tracking)
+-- 6. Sync status (per ticker sync health)
+CREATE TABLE sync_status (
+    id SERIAL PRIMARY KEY,
+    ticker_id INTEGER NOT NULL UNIQUE REFERENCES tickers(id),
+    last_sync_date DATE,
+    last_sync_timestamp TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message VARCHAR(500),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP
+);
+
+-- 7. Sync Jobs (For Landing Page progress tracking)
 CREATE TABLE sync_jobs (
     id SERIAL PRIMARY KEY,
     sync_id VARCHAR(100) UNIQUE NOT NULL,
-    index_id INTEGER REFERENCES indexes(id),
-    status VARCHAR(20) NOT NULL,
+    index_id INTEGER NOT NULL REFERENCES indexes(id),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
     total_tickers INTEGER DEFAULT 0,
     processed_tickers INTEGER DEFAULT 0,
     current_ticker VARCHAR(20),
     started_at TIMESTAMP DEFAULT NOW(),
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    error_message VARCHAR(500)
 );
 
 -- Crucial Indexes for Performance
@@ -306,6 +344,8 @@ CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.0.0 | 2026-04-10 | First stable schema release docs. Confirmed ORM alignment for all active tables/constraints, clarified sync job status compatibility (`running` legacy mapped to `in_progress` at API layer), and corrected `technical_indicators.ticker_id` as NOT NULL in table docs. |
+| 0.2.3 | 2026-04-10 | Aligned schema docs to active models: added `sync_status` table, updated `prices`/`technical_indicators` IDs to integer auto-increment, adjusted nullable fields and float types, documented `key_metrics` unique constraint (`ticker_id`, `observation_date`), and expanded `sync_jobs` statuses plus `error_message`. |
 | 0.2.2 | 2026-04-07 | Added `technical_indicators` table to schema docs (columns, relationships, SQL DDL, and performance indexes) |
 | 0.2.1 | 2026-04-06 | Added `yfinance_suffix` column to indexes table for exchange-specific suffix support |
 | 0.2.0 | 2026-04-02 | Added full OHLCV to prices; added industry/is_active/created_at to tickers; added ticker_count/is_active/created_at to indexes; added pbv/dividend_yield/roe/fiscal_quarter/last_updated to key_metrics; added id/index_id/current_ticker/timestamps to sync_jobs; added idx_sync_jobs_status |

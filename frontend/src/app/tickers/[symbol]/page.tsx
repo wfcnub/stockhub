@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import type { TickerDetails, ChartDataPoint, TimeRangeValue } from '@/types';
+import type { TickerDetails, ChartDataPoint, TimeRangeValue, DivergenceEvent } from '@/types';
 import { TIME_RANGES } from '@/types';
-import { getTicker, getChartData } from '@/lib/api';
-import { KeyMetrics, TickerChart, RSIChart, MACDChart } from '@/components/ticker';
+import { getTicker, getChartData, getTickerDivergences } from '@/lib/api';
+import { KeyMetrics, TickerChart, MACDChart } from '@/components/ticker';
 import { ControlShell } from '@/components/layout/ControlShell';
 
-const DEFAULT_MA_PERIODS = [20, 50, 200];
+const DEFAULT_MA_PERIODS = [10, 15, 20, 50, 100, 200];
 
 export default function TickerDetailPage() {
   const params = useParams();
@@ -21,7 +21,8 @@ export default function TickerDetailPage() {
   const [chartLoading, setChartLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
-  const [selectedRange, setSelectedRange] = useState<TimeRangeValue>('1Y');
+  const [divergences, setDivergences] = useState<DivergenceEvent[]>([]);
+  const [selectedRange, setSelectedRange] = useState<TimeRangeValue>('ALL');
   const [selectedMA, setSelectedMA] = useState<number[]>(DEFAULT_MA_PERIODS);
 
   const fetchTicker = useCallback(async () => {
@@ -55,6 +56,15 @@ export default function TickerDetailPage() {
     }
   }, [symbol, selectedRange, selectedMA]);
 
+  const fetchDivergences = useCallback(async () => {
+    try {
+      const response = await getTickerDivergences(symbol);
+      setDivergences(response.events);
+    } catch {
+      setDivergences([]);
+    }
+  }, [symbol]);
+
   useEffect(() => {
     fetchTicker();
   }, [fetchTicker]);
@@ -62,6 +72,10 @@ export default function TickerDetailPage() {
   useEffect(() => {
     fetchChartData();
   }, [fetchChartData]);
+
+  useEffect(() => {
+    fetchDivergences();
+  }, [fetchDivergences]);
 
   if (isLoading) {
     return (
@@ -130,6 +144,7 @@ export default function TickerDetailPage() {
         <TickerChart
           symbol={symbol}
           data={chartData}
+          divergences={divergences}
           isLoading={chartLoading}
           error={chartError}
           selectedRange={selectedRange}
@@ -139,10 +154,7 @@ export default function TickerDetailPage() {
         />
 
         {/* Technical Indicators */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <RSIChart data={chartData} />
-          <MACDChart data={chartData} />
-        </div>
+        <MACDChart data={chartData} />
       </div>
     </ControlShell>
   );
