@@ -1,4 +1,4 @@
-// API Contract v0.2.4 Types
+// API Contract v1.0.5 Types
 
 // ============ Platform Statistics ============
 
@@ -157,19 +157,38 @@ export interface ChartDataPoint {
       value: number;
       signal: number;
       histogram: number;
+      ma_type?: MACDMovingAverageType;
+    };
+    macd_modes?: {
+      sma?: {
+        value: number;
+        signal: number;
+        histogram: number;
+        ma_type?: MACDMovingAverageType;
+      };
+      ema?: {
+        value: number;
+        signal: number;
+        histogram: number;
+        ma_type?: MACDMovingAverageType;
+      };
     };
   };
 }
 
+export type MACDMovingAverageType = 'sma' | 'ema';
+
 export interface ChartDataResponse {
   symbol: string;
   range: string;
+  macd_ma_type?: MACDMovingAverageType;
   data: ChartDataPoint[];
 }
 
 export interface ChartQueryParams {
   range?: '1M' | '3M' | '6M' | '1Y' | '5Y' | 'ALL';
   ma_periods?: string; // Comma-separated, e.g., "10,15,20,50,100,200"
+  macd_ma_type?: MACDMovingAverageType;
 }
 
 // ============ Screener ============
@@ -188,7 +207,7 @@ export interface ScreenerResponse {
 
 export type DivergenceType = 'regular' | 'hidden';
 export type DivergenceGrade = 'oversold' | 'neutral';
-export type DivergenceStrategyType = 'BULLISH_CONFIRMED' | 'BULLISH_AGGRESSIVE';
+export type DivergenceStrategyType = 'BULLISH_CONFIRMED' | 'BULLISH_AGGRESSIVE' | 'BULLISH_EMERGING';
 export type DivergenceLineStyle = 'dashed' | 'dotted';
 
 export interface DivergencePoint {
@@ -211,6 +230,7 @@ export interface DivergenceEvent {
   confirmation_timestamp: number;
   signal_timestamp: number;
   invalidation_level: number | null;
+  is_invalidated?: boolean;
   action: string;
 }
 
@@ -226,8 +246,81 @@ export interface DivergenceScreenerItem extends DivergenceEvent {
 
 export interface DivergenceScreenerResponse {
   lookback_days: number;
+  include_invalidated?: boolean;
   count: number;
   results: DivergenceScreenerItem[];
+}
+
+// ============ Triangle Detection ============
+
+export type TriangleType = 'symmetrical' | 'ascending' | 'descending';
+export type TriangleState = 'potential' | 'breakout';
+export type BreakoutDirection = 'bullish' | 'bearish';
+export type TriangleConfidenceLevel = 'low' | 'medium' | 'high';
+
+export interface TriangleLineAnchor {
+  timestamp: number;
+  price: number;
+}
+
+export interface TriangleLine {
+  start_timestamp: number;
+  start_price: number;
+  end_timestamp: number;
+  end_price: number;
+}
+
+export interface TriangleEvent {
+  triangle_type: TriangleType;
+  state: TriangleState;
+  breakout_direction: BreakoutDirection | null;
+  line_style: 'solid' | 'dashed' | 'dotted';
+  color_hex: string;
+  confidence_level: TriangleConfidenceLevel;
+  confidence_score: number;
+  upper_touch_count: number;
+  lower_touch_count: number;
+  total_touch_count: number;
+  breakout_close_count: number;
+  volume_ratio: number | null;
+  upper_line: TriangleLine;
+  lower_line: TriangleLine;
+  formation_start_timestamp: number;
+  apex_timestamp: number;
+  signal_timestamp: number;
+  invalidation_level: number | null;
+  action: string;
+}
+
+export interface TickerTrianglesResponse {
+  symbol: string;
+  events: TriangleEvent[];
+}
+
+export interface TriangleScreenerItem extends TriangleEvent {
+  symbol: string;
+  name: string;
+}
+
+export interface TriangleScreenerResponse {
+  lookback_days: number;
+  count: number;
+  results: TriangleScreenerItem[];
+}
+
+export interface TriangleConfigParams {
+  lookback_bars?: number;
+  pivot_left_window?: number;
+  pivot_right_window?: number;
+  breakout_relaxed?: boolean;
+  include_potential?: boolean;
+  include_breakouts?: boolean;
+  triangle_types?: TriangleType[];
+  direction?: 'all' | BreakoutDirection;
+  state?: 'all' | TriangleState;
+  min_confidence?: number;
+  index_code?: string;
+  limit?: number;
 }
 
 // ============ Time Range Options ============

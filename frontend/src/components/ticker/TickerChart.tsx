@@ -4,16 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { MouseEventParams, Time } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
-import type { ChartDataPoint, TimeRangeValue, DivergenceEvent } from '@/types';
+import type { ChartDataPoint, TimeRangeValue, DivergenceEvent, TriangleEvent } from '@/types';
 import { TIME_RANGES, MA_PERIOD_OPTIONS } from '@/types';
 import { getChartThemeColors } from '@/lib/chartTheme';
 
-type ChartViewMode = 'default' | 'bullish_divergence';
+type ChartViewMode = 'default' | 'bullish_divergence' | 'triangle_patterns';
 
 interface TickerChartProps {
   symbol: string;
   data: ChartDataPoint[];
   divergences: DivergenceEvent[];
+  triangles: TriangleEvent[];
   isLoading: boolean;
   error: string | null;
   selectedRange: TimeRangeValue;
@@ -47,6 +48,28 @@ function dateStringToUnixSeconds(value: string): number {
   return Math.floor(new Date(`${value}T00:00:00Z`).getTime() / 1000);
 }
 
+// Threshold for considering a divergence "historical" (60 trading bars old)
+const MAX_LOOKBACK_BARS = 60;
+
+function isHistoricalDivergence(event: DivergenceEvent, data: ChartDataPoint[]): boolean {
+  if (data.length === 0) return false;
+  
+  const signalTimestamp = event.signal_timestamp;
+  let signalIndex = -1;
+  
+  for (let i = 0; i < data.length; i++) {
+    if (dateStringToUnixSeconds(data[i].date) === signalTimestamp) {
+      signalIndex = i;
+      break;
+    }
+  }
+  
+  if (signalIndex === -1) return false;
+  
+  const barsAgo = data.length - 1 - signalIndex;
+  return barsAgo >= MAX_LOOKBACK_BARS;
+}
+
 function getDivergenceColors(event: DivergenceEvent): { lineColor: string; boxColorTriplet: string } {
   if (event.strategy_type === 'BULLISH_AGGRESSIVE') {
     return {
@@ -55,10 +78,55 @@ function getDivergenceColors(event: DivergenceEvent): { lineColor: string; boxCo
     };
   }
 
+  if (event.strategy_type === 'BULLISH_EMERGING') {
+    return {
+      lineColor: 'rgb(147, 51, 234)',
+      boxColorTriplet: '147, 51, 234',
+    };
+  }
+
+  // BULLISH_CONFIRMED (default)
   return {
     lineColor: 'rgb(236, 72, 153)',
     boxColorTriplet: '236, 72, 153',
   };
+}
+
+function getTriangleColorTriplet(event: TriangleEvent): string {
+  if (event.state === 'potential') {
+    return '6, 182, 212';
+  }
+
+  if (event.breakout_direction === 'bearish') {
+    return '239, 68, 68';
+  }
+
+  return '34, 197, 94';
+}
+
+function getTriangleLineWidth(confidenceLevel: TriangleEvent['confidence_level']): number {
+  if (confidenceLevel === 'high') {
+    return 3;
+  }
+
+  if (confidenceLevel === 'medium') {
+    return 2.4;
+  }
+
+  return 2;
+}
+
+function getTriangleSignalPrice(event: TriangleEvent): number {
+  if (event.state === 'breakout') {
+    if (event.breakout_direction === 'bullish') {
+      return event.upper_line.end_price;
+    }
+    if (event.breakout_direction === 'bearish') {
+      return event.lower_line.end_price;
+    }
+  }
+
+  return (event.upper_line.end_price + event.lower_line.end_price) / 2;
 }
 
 interface CursorReadout {
@@ -148,10 +216,126 @@ function formatFixed(value: number, fractionDigits = 2): string {
   });
 }
 
+const CLIP_LEFT = 1;
+const CLIP_RIGHT = 2;
+const CLIP_BOTTOM = 4;
+const CLIP_TOP = 8;
+
+interface ClippedLineSegment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+function getClipOutCode(
+  x: number,
+  y: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): number {
+  let code = 0;
+
+  if (x < minX) {
+    code |= CLIP_LEFT;
+  } else if (x > maxX) {
+    code |= CLIP_RIGHT;
+  }
+
+  if (y < minY) {
+    code |= CLIP_TOP;
+  } else if (y > maxY) {
+    code |= CLIP_BOTTOM;
+  }
+
+  return code;
+}
+
+function clipLineToRect(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): ClippedLineSegment | null {
+  let currentX1 = x1;
+  let currentY1 = y1;
+  let currentX2 = x2;
+  let currentY2 = y2;
+
+  let outCode1 = getClipOutCode(currentX1, currentY1, minX, minY, maxX, maxY);
+  let outCode2 = getClipOutCode(currentX2, currentY2, minX, minY, maxX, maxY);
+
+  while (true) {
+    if (!(outCode1 | outCode2)) {
+      return {
+        x1: currentX1,
+        y1: currentY1,
+        x2: currentX2,
+        y2: currentY2,
+      };
+    }
+
+    if (outCode1 & outCode2) {
+      return null;
+    }
+
+    const outCodeOut = outCode1 || outCode2;
+    let nextX = 0;
+    let nextY = 0;
+
+    if (outCodeOut & CLIP_TOP) {
+      if (currentY2 === currentY1) {
+        return null;
+      }
+
+      nextX = currentX1 + ((currentX2 - currentX1) * (minY - currentY1)) / (currentY2 - currentY1);
+      nextY = minY;
+    } else if (outCodeOut & CLIP_BOTTOM) {
+      if (currentY2 === currentY1) {
+        return null;
+      }
+
+      nextX = currentX1 + ((currentX2 - currentX1) * (maxY - currentY1)) / (currentY2 - currentY1);
+      nextY = maxY;
+    } else if (outCodeOut & CLIP_RIGHT) {
+      if (currentX2 === currentX1) {
+        return null;
+      }
+
+      nextY = currentY1 + ((currentY2 - currentY1) * (maxX - currentX1)) / (currentX2 - currentX1);
+      nextX = maxX;
+    } else {
+      if (currentX2 === currentX1) {
+        return null;
+      }
+
+      nextY = currentY1 + ((currentY2 - currentY1) * (minX - currentX1)) / (currentX2 - currentX1);
+      nextX = minX;
+    }
+
+    if (outCodeOut === outCode1) {
+      currentX1 = nextX;
+      currentY1 = nextY;
+      outCode1 = getClipOutCode(currentX1, currentY1, minX, minY, maxX, maxY);
+    } else {
+      currentX2 = nextX;
+      currentY2 = nextY;
+      outCode2 = getClipOutCode(currentX2, currentY2, minX, minY, maxX, maxY);
+    }
+  }
+}
+
 export function TickerChart({
   symbol,
   data,
   divergences,
+  triangles,
   isLoading,
   error,
   selectedRange,
@@ -162,11 +346,19 @@ export function TickerChart({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const divergenceOverlayRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const queueOverlayRenderRef = useRef<(() => void) | null>(null);
+  const showInvalidatedAggressiveRef = useRef(false);
+  const showHistoricalDivergencesRef = useRef(false);
+  const showEmergingRef = useRef(true);
   const { resolvedTheme } = useTheme();
   const [viewMode, setViewMode] = useState<ChartViewMode>('default');
+  const [showInvalidatedAggressive, setShowInvalidatedAggressive] = useState(false);
+  const [showHistoricalDivergences, setShowHistoricalDivergences] = useState(false);
+  const [showEmerging, setShowEmerging] = useState(true);
   const [cursorReadout, setCursorReadout] = useState<CursorReadout | null>(null);
   const [themeRefreshKey, setThemeRefreshKey] = useState(0);
   const isBullishView = viewMode === 'bullish_divergence';
+  const isTriangleView = viewMode === 'triangle_patterns';
   const maThemeColors = getChartThemeColors();
   const seriesRef = useRef<{
     candlestick: ISeriesApi<'Candlestick'> | null;
@@ -223,16 +415,29 @@ export function TickerChart({
       lineStyle: 'solid' | 'dashed' | 'dotted',
       lineWidth = 2,
     ) => {
-      const lineLength = Math.hypot(x2 - x1, y2 - y1);
+      const maxX = overlay.clientWidth;
+      const maxY = overlay.clientHeight;
+
+      if (maxX <= 0 || maxY <= 0) {
+        return;
+      }
+
+      const clippedLine = clipLineToRect(x1, y1, x2, y2, 0, 0, maxX, maxY);
+
+      if (!clippedLine) {
+        return;
+      }
+
+      const lineLength = Math.hypot(clippedLine.x2 - clippedLine.x1, clippedLine.y2 - clippedLine.y1);
       if (lineLength <= 0) {
         return;
       }
 
-      const lineAngle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
+      const lineAngle = Math.atan2(clippedLine.y2 - clippedLine.y1, clippedLine.x2 - clippedLine.x1) * (180 / Math.PI);
       const line = document.createElement('div');
       line.style.position = 'absolute';
-      line.style.left = `${x1}px`;
-      line.style.top = `${y1}px`;
+      line.style.left = `${clippedLine.x1}px`;
+      line.style.top = `${clippedLine.y1}px`;
       line.style.width = `${lineLength}px`;
       line.style.borderTop = `${lineWidth}px ${lineStyle} ${lineColor}`;
       line.style.transformOrigin = '0 0';
@@ -431,21 +636,43 @@ export function TickerChart({
       }
 
       overlay.replaceChildren();
-      const latestPoint = data[data.length - 1];
-      const latestTimestamp = latestPoint ? dateStringToUnixSeconds(latestPoint.date) : null;
-      const latestLow = latestPoint && isFiniteNumber(latestPoint.price.low)
-        ? latestPoint.price.low
-        : null;
+      const overlayWidth = overlay.clientWidth;
+      const overlayHeight = overlay.clientHeight;
+
+      if (overlayWidth <= 0 || overlayHeight <= 0) {
+        return;
+      }
+
+      const isAggressiveInvalidated = (event: DivergenceEvent): boolean => {
+        const invalidationLevel = event.invalidation_level;
+
+        if (event.strategy_type !== 'BULLISH_AGGRESSIVE' || !isFiniteNumber(invalidationLevel)) {
+          return false;
+        }
+
+        return data.some((point) => {
+          const pointTimestamp = dateStringToUnixSeconds(point.date);
+          return (
+            pointTimestamp > event.p2.timestamp
+            && isFiniteNumber(point.price.low)
+            && point.price.low <= invalidationLevel
+          );
+        });
+      };
 
       divergences.forEach((event) => {
-        if (
-          event.strategy_type === 'BULLISH_AGGRESSIVE'
-          && latestTimestamp !== null
-          && latestLow !== null
-          && event.invalidation_level !== null
-          && latestTimestamp > event.p2.timestamp
-          && latestLow < event.invalidation_level
-        ) {
+        const isInvalidatedAggressiveEvent = isAggressiveInvalidated(event);
+        const isHistoricalEvent = isHistoricalDivergence(event, data);
+        const isEmergingEvent = event.strategy_type === 'BULLISH_EMERGING';
+        
+        // Skip if invalidated and not showing, or if historical and not showing, or if emerging and not showing
+        if (isInvalidatedAggressiveEvent && !showInvalidatedAggressiveRef.current) {
+          return;
+        }
+        if (isHistoricalEvent && !showHistoricalDivergencesRef.current) {
+          return;
+        }
+        if (isEmergingEvent && !showEmergingRef.current) {
           return;
         }
 
@@ -457,32 +684,71 @@ export function TickerChart({
         const y1 = candleSeries.priceToCoordinate(event.p1.low);
         const y2 = candleSeries.priceToCoordinate(event.p2.low);
         const { lineColor, boxColorTriplet } = getDivergenceColors(event);
+        
+        // Determine styling based on invalidated/historical status
+        let renderedLineColor = lineColor;
+        if (isInvalidatedAggressiveEvent) {
+          renderedLineColor = `rgba(${boxColorTriplet}, 0.55)`;
+        } else if (isHistoricalEvent) {
+          // Historical divergences: gray color with reduced opacity
+          renderedLineColor = `rgba(128, 128, 128, 0.5)`;
+        }
+        
         const lineStyle = event.line_style === 'dotted' ? 'dotted' : 'dashed';
 
         if (x1 === null || x2 === null || y1 === null || y2 === null) {
           return;
         }
 
-        const left = Math.min(x1, x2);
-        const right = Math.max(x1, x2);
-        const top = Math.min(y1, y2) - 8;
-        const height = Math.abs(y2 - y1) + 16;
-        const width = Math.max(right - left, 2);
+        const rawLeft = Math.min(x1, x2);
+        const rawRight = Math.max(x1, x2);
+        const rawTop = Math.min(y1, y2) - 8;
+        const rawBottom = Math.max(y1, y2) + 8;
 
-        const backgroundOpacity = event.grade === 'oversold' ? 0.2 : 0.1;
+        const left = Math.max(rawLeft, 0);
+        const right = Math.min(rawRight, overlayWidth);
+        const top = Math.max(rawTop, 0);
+        const bottom = Math.min(rawBottom, overlayHeight);
+
+        if (right <= left || bottom <= top) {
+          return;
+        }
+
+        const width = right - left;
+        const height = bottom - top;
+
+        // Opacity based on state
+        let backgroundOpacity = event.grade === 'oversold' ? 0.2 : 0.1;
+        let borderOpacity = 0.5;
+        
+        if (isInvalidatedAggressiveEvent) {
+          backgroundOpacity = 0.06;
+          borderOpacity = 0.35;
+        } else if (isHistoricalEvent) {
+          backgroundOpacity = 0.04;
+          borderOpacity = 0.25;
+        }
 
         const box = document.createElement('div');
         box.style.position = 'absolute';
         box.style.left = `${left}px`;
         box.style.top = `${top}px`;
         box.style.width = `${width}px`;
-        box.style.height = `${Math.max(height, 8)}px`;
+        box.style.height = `${height}px`;
         box.style.borderRadius = '4px';
-        box.style.backgroundColor = `rgba(${boxColorTriplet}, ${backgroundOpacity})`;
-        box.style.border = `1px ${lineStyle} rgba(${boxColorTriplet}, 0.5)`;
+        
+        // Use gray for historical, original color for invalidated/normal
+        if (isHistoricalEvent) {
+          box.style.backgroundColor = `rgba(128, 128, 128, ${backgroundOpacity})`;
+          box.style.border = `1px ${lineStyle} rgba(128, 128, 128, ${borderOpacity})`;
+        } else {
+          box.style.backgroundColor = `rgba(${boxColorTriplet}, ${backgroundOpacity})`;
+          box.style.border = `1px ${lineStyle} rgba(${boxColorTriplet}, ${borderOpacity})`;
+        }
+        
         overlay.appendChild(box);
 
-        createOverlayLine(overlay, x1, y1, x2, y2, lineColor, lineStyle, 2);
+        createOverlayLine(overlay, x1, y1, x2, y2, renderedLineColor, lineStyle, 2);
 
         if (
           isBullishView
@@ -494,10 +760,98 @@ export function TickerChart({
           const rsiY2 = rsiSeries.priceToCoordinate(event.p2.rsi_14);
 
           if (rsiY1 !== null && rsiY2 !== null) {
-            createOverlayLine(overlay, x1, rsiY1, x2, rsiY2, lineColor, lineStyle, 2);
+            createOverlayLine(overlay, x1, rsiY1, x2, rsiY2, renderedLineColor, lineStyle, 2);
           }
         }
       });
+    };
+
+    const renderTriangleOverlay = () => {
+      const overlay = overlayElement;
+      const candleSeries = seriesStore.candlestick;
+
+      if (!overlay || !candleSeries) {
+        return;
+      }
+
+      overlay.replaceChildren();
+      const overlayWidth = overlay.clientWidth;
+      const overlayHeight = overlay.clientHeight;
+
+      if (overlayWidth <= 0 || overlayHeight <= 0) {
+        return;
+      }
+
+      triangles.forEach((event) => {
+        const colorTriplet = getTriangleColorTriplet(event);
+        const opacity = event.confidence_level === 'high'
+          ? 0.95
+          : (event.confidence_level === 'medium' ? 0.82 : 0.7);
+        const lineColor = `rgba(${colorTriplet}, ${opacity})`;
+        const lineStyle = event.line_style === 'dotted'
+          ? 'dotted'
+          : (event.line_style === 'dashed' ? 'dashed' : 'solid');
+        const lineWidth = getTriangleLineWidth(event.confidence_level);
+
+        const upperStartTime = timestampToChartDate(event.upper_line.start_timestamp);
+        const upperEndTime = timestampToChartDate(event.upper_line.end_timestamp);
+        const lowerStartTime = timestampToChartDate(event.lower_line.start_timestamp);
+        const lowerEndTime = timestampToChartDate(event.lower_line.end_timestamp);
+
+        const upperX1 = chart.timeScale().timeToCoordinate(upperStartTime);
+        const upperX2 = chart.timeScale().timeToCoordinate(upperEndTime);
+        const lowerX1 = chart.timeScale().timeToCoordinate(lowerStartTime);
+        const lowerX2 = chart.timeScale().timeToCoordinate(lowerEndTime);
+
+        const upperY1 = candleSeries.priceToCoordinate(event.upper_line.start_price);
+        const upperY2 = candleSeries.priceToCoordinate(event.upper_line.end_price);
+        const lowerY1 = candleSeries.priceToCoordinate(event.lower_line.start_price);
+        const lowerY2 = candleSeries.priceToCoordinate(event.lower_line.end_price);
+
+        if (upperX1 !== null && upperX2 !== null && upperY1 !== null && upperY2 !== null) {
+          createOverlayLine(overlay, upperX1, upperY1, upperX2, upperY2, lineColor, lineStyle, lineWidth);
+        }
+
+        if (lowerX1 !== null && lowerX2 !== null && lowerY1 !== null && lowerY2 !== null) {
+          createOverlayLine(overlay, lowerX1, lowerY1, lowerX2, lowerY2, lineColor, lineStyle, lineWidth);
+        }
+
+        const signalTime = timestampToChartDate(event.signal_timestamp);
+        const signalX = chart.timeScale().timeToCoordinate(signalTime);
+        const signalPrice = getTriangleSignalPrice(event);
+        const signalY = candleSeries.priceToCoordinate(signalPrice);
+
+        if (signalX === null || signalY === null) {
+          return;
+        }
+
+        const markerSize = event.confidence_level === 'high' ? 10 : 8;
+        const marker = document.createElement('div');
+        marker.style.position = 'absolute';
+        marker.style.left = `${signalX - (markerSize / 2)}px`;
+        marker.style.top = `${signalY - (markerSize / 2)}px`;
+        marker.style.width = `${markerSize}px`;
+        marker.style.height = `${markerSize}px`;
+        marker.style.borderRadius = '50%';
+        marker.style.backgroundColor = `rgba(${colorTriplet}, 0.25)`;
+        marker.style.border = `2px solid rgba(${colorTriplet}, ${opacity})`;
+        overlay.appendChild(marker);
+      });
+    };
+
+    const renderOverlay = () => {
+      if (isTriangleView) {
+        renderTriangleOverlay();
+        return;
+      }
+      if (isBullishView) {
+        renderDivergenceOverlay();
+        return;
+      }
+
+      if (overlayElement) {
+        overlayElement.replaceChildren();
+      }
     };
 
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
@@ -567,25 +921,64 @@ export function TickerChart({
       });
     };
 
+    let overlayRenderFrame = 0;
+    const queueOverlayRender = () => {
+      if (overlayRenderFrame) {
+        window.cancelAnimationFrame(overlayRenderFrame);
+      }
+
+      overlayRenderFrame = window.requestAnimationFrame(() => {
+        overlayRenderFrame = 0;
+        renderOverlay();
+      });
+    };
+
+    // Store in ref so it can be accessed from other effects
+    queueOverlayRenderRef.current = queueOverlayRender;
+
+    const handleVisibleRangeChange = () => {
+      queueOverlayRender();
+    };
+
     chart.timeScale().fitContent();
-    renderDivergenceOverlay();
-    chart.timeScale().subscribeVisibleTimeRangeChange(renderDivergenceOverlay);
+    queueOverlayRender();
+    // Schedule another pass for the initial paint after layout settles.
+    window.requestAnimationFrame(() => {
+      queueOverlayRender();
+    });
+
+    chart.timeScale().subscribeVisibleTimeRangeChange(handleVisibleRangeChange);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
     chart.subscribeCrosshairMove(handleCrosshairMove);
 
-    // Handle resize
-    const handleResize = () => {
+    // Keep chart width and divergence overlay in sync with container changes.
+    const handleContainerResize = () => {
       if (chartContainerRef.current) {
         chart.applyOptions({ width: chartContainerRef.current.clientWidth });
-        renderDivergenceOverlay();
+        queueOverlayRender();
       }
     };
 
-    window.addEventListener('resize', handleResize);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(handleContainerResize)
+      : null;
+    if (chartContainerRef.current && resizeObserver) {
+      resizeObserver.observe(chartContainerRef.current);
+    }
+
+    window.addEventListener('resize', handleContainerResize);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.timeScale().unsubscribeVisibleTimeRangeChange(renderDivergenceOverlay);
+      window.removeEventListener('resize', handleContainerResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(handleVisibleRangeChange);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
+      if (overlayRenderFrame) {
+        window.cancelAnimationFrame(overlayRenderFrame);
+      }
       if (overlayElement) {
         overlayElement.replaceChildren();
       }
@@ -600,7 +993,29 @@ export function TickerChart({
       setCursorReadout(null);
       chart.remove();
     };
-  }, [data, selectedMA, themeRefreshKey, divergences, isBullishView]);
+  }, [
+    data,
+    selectedMA,
+    themeRefreshKey,
+    divergences,
+    triangles,
+    isBullishView,
+    isTriangleView,
+  ]);
+
+  // Separate effect to update overlay visibility when divergence toggles change
+  // without recreating the chart (preserves zoom/pan state)
+  useEffect(() => {
+    // Update refs so renderOverlay can see current state values
+    showInvalidatedAggressiveRef.current = showInvalidatedAggressive;
+    showHistoricalDivergencesRef.current = showHistoricalDivergences;
+    showEmergingRef.current = showEmerging;
+
+    // Trigger overlay re-render
+    if (queueOverlayRenderRef.current) {
+      queueOverlayRenderRef.current();
+    }
+  }, [showInvalidatedAggressive, showHistoricalDivergences, showEmerging]);
 
   const toggleMA = (period: number) => {
     if (selectedMA.includes(period)) {
@@ -649,7 +1064,10 @@ export function TickerChart({
     <div className="hud-panel p-4">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
         <h3 className="text-lg font-semibold text-gemini-text-primary">
-          {symbol} {isBullishView ? 'Price + RSI Divergence View' : 'Price Chart'}
+          {symbol}{' '}
+          {isTriangleView
+            ? 'Triangle Pattern View'
+            : (isBullishView ? 'Price + RSI Divergence View' : 'Price Chart')}
         </h3>
         
         <div className="flex flex-wrap gap-4">
@@ -674,6 +1092,16 @@ export function TickerChart({
               }`}
             >
               Bullish Divergence
+            </button>
+            <button
+              onClick={() => setViewMode('triangle_patterns')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                viewMode === 'triangle_patterns'
+                  ? 'bg-gemini-gradient text-white'
+                  : 'bg-gemini-bg-secondary/70 text-gemini-text-secondary hover:text-gemini-text-primary hover:bg-gemini-surface-hover'
+              }`}
+            >
+              Triangle Patterns
             </button>
           </div>
 
@@ -715,6 +1143,44 @@ export function TickerChart({
               </button>
             ))}
           </div>
+
+          {isBullishView && (
+            <div className="flex gap-2">
+              <div className="inline-flex gap-2 items-center rounded-lg border border-gemini-surface-border/30 bg-gemini-bg-secondary/50 px-3 py-2">
+                <div className="text-xs font-semibold text-gemini-text-secondary whitespace-nowrap">Advanced Options:</div>
+                <button
+                  onClick={() => setShowInvalidatedAggressive((current) => !current)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    showInvalidatedAggressive
+                      ? 'bg-gemini-accent-red/20 text-gemini-accent-red border border-gemini-accent-red/30'
+                      : 'bg-gemini-bg-secondary/70 text-gemini-text-secondary hover:text-gemini-text-primary hover:bg-gemini-surface-hover'
+                  }`}
+                >
+                  {showInvalidatedAggressive ? '✓ Invalidated' : 'Invalidated'}
+                </button>
+                <button
+                  onClick={() => setShowHistoricalDivergences((current) => !current)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    showHistoricalDivergences
+                      ? 'bg-gemini-accent-gray/20 text-gemini-accent-gray border border-gemini-accent-gray/30'
+                      : 'bg-gemini-bg-secondary/70 text-gemini-text-secondary hover:text-gemini-text-primary hover:bg-gemini-surface-hover'
+                  }`}
+                >
+                  {showHistoricalDivergences ? '✓ Historical' : 'Historical'}
+                </button>
+                <button
+                  onClick={() => setShowEmerging((current) => !current)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                    showEmerging
+                      ? 'bg-gemini-accent-purple/20 text-gemini-accent-purple border border-gemini-accent-purple/30'
+                      : 'bg-gemini-bg-secondary/70 text-gemini-text-secondary hover:text-gemini-text-primary hover:bg-gemini-surface-hover'
+                  }`}
+                >
+                  {showEmerging ? '✓ Emerging' : 'Emerging'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -743,10 +1209,14 @@ export function TickerChart({
               )}
             </div>
           ) : (
-            <div className="text-gemini-text-tertiary">Hover chart to inspect price and RSI values</div>
+            <div className="text-gemini-text-tertiary">
+              {isBullishView
+                ? 'Hover chart to inspect price and RSI values'
+                : 'Hover chart to inspect price and volume values'}
+            </div>
           )}
         </div>
-        <div ref={divergenceOverlayRef} className="pointer-events-none absolute inset-0 z-10" />
+        <div ref={divergenceOverlayRef} className="pointer-events-none absolute inset-0 z-10 overflow-hidden" />
       </div>
 
       {/* Legend */}
@@ -763,31 +1233,71 @@ export function TickerChart({
               <span>MA {period}</span>
             </div>
         ))}
-        <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
-          <div className="h-0.5 w-4 border-t-2 border-dashed" style={{ borderColor: 'rgb(236, 72, 153)' }} />
-          <span>Non-aggressive divergence</span>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
-          <div className="h-0.5 w-4 border-t-2 border-dotted" style={{ borderColor: 'rgb(250, 204, 21)' }} />
-          <span>Aggressive divergence</span>
-        </div>
-        {isBullishView && (
+        {isTriangleView ? (
           <>
             <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
-              <div className="h-0.5 w-4 rounded" style={{ backgroundColor: maThemeColors.accentPurple }} />
-              <span>RSI (14) in shared time view</span>
+              <div className="h-0.5 w-4 border-t-2 border-dashed" style={{ borderColor: 'rgb(6, 182, 212)' }} />
+              <span>Potential triangle</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
-              <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(236, 72, 153)' }} />
-              <span>RSI P1 to P2 path (non-aggressive)</span>
+              <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(34, 197, 94)' }} />
+              <span>Bullish breakout</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
-              <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(250, 204, 21)' }} />
-              <span>RSI P1 to P2 path (aggressive)</span>
+              <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(239, 68, 68)' }} />
+              <span>Bearish breakout</span>
             </div>
+            <div className="text-sm text-gemini-text-tertiary">High-confidence triangles use thicker lines and larger markers</div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+              <div className="h-0.5 w-4 border-t-2 border-dashed" style={{ borderColor: 'rgb(236, 72, 153)' }} />
+              <span>Confirmed divergence</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+              <div className="h-0.5 w-4 border-t-2 border-dotted" style={{ borderColor: 'rgb(250, 204, 21)' }} />
+              <span>Aggressive divergence</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+              <div className="h-0.5 w-4 border-t-2 border-dotted" style={{ borderColor: 'rgb(147, 51, 234)' }} />
+              <span>Emerging divergence</span>
+            </div>
+            {isBullishView && (
+              <>
+                <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+                  <div className="h-0.5 w-4 rounded" style={{ backgroundColor: maThemeColors.accentPurple }} />
+                  <span>RSI (14) in shared time view</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+                  <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(236, 72, 153)' }} />
+                  <span>RSI P1 to P2 path (non-aggressive)</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+                  <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(250, 204, 21)' }} />
+                  <span>RSI P1 to P2 path (aggressive)</span>
+                </div>
+              </>
+            )}
+            <div className="text-sm text-gemini-text-tertiary">Oversold zones use stronger shading</div>
+            {isBullishView && (
+              <>
+                {showInvalidatedAggressive && (
+                  <div className="flex items-center gap-2 text-sm text-gemini-accent-red/70">
+                    <div className="h-0.5 w-4" style={{ borderColor: 'rgb(239, 68, 68)', borderTop: '1px dotted' }} />
+                    <span>Invalidated aggressive lines (low opacity)</span>
+                  </div>
+                )}
+                {showHistoricalDivergences && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500/70">
+                    <div className="h-0.5 w-4" style={{ borderColor: 'rgb(128, 128, 128)', borderTop: '1px dotted' }} />
+                    <span>Historical lines (60+ bars old, low opacity)</span>
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
-        <div className="text-sm text-gemini-text-tertiary">Oversold zones use stronger shading</div>
       </div>
     </div>
   );

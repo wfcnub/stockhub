@@ -1,4 +1,4 @@
-# StockHub API Contract (v1.0.0)
+# StockHub API Contract (v1.1.0)
 
 > **Source of Truth** - This document defines the API contract. Backend must implement these endpoints. Frontend must consume these endpoints.
 
@@ -27,9 +27,12 @@
 | `/indicators/available-types` | GET | Available indicator metadata and defaults |
 | `/charts/{ticker_symbol}/divergences` | GET | Divergence events for ticker overlays |
 | `/screener/divergences` | GET | Market-level divergence screener |
+| `/charts/{ticker_symbol}/triangles` | GET | Triangle events for ticker overlays |
+| `/screener/triangles` | GET | Market-level triangle screener |
 | `/sync/start` | POST | Trigger a background sync job |
 | `/sync/progress` | GET | Poll sync progress |
 | `/sync/stop` | POST | Stop active sync job |
+| `/sync/migrate-macd` | POST | Migrate/backfill MACD mode datasets |
 | `/sync/init-index` | POST | Create an index record for sync workflows |
 | `/sync/discover/{index_code}` | POST | Discover/sync index constituents only |
 | `/sync/status/{symbol}` | GET | Get per-ticker sync status |
@@ -285,12 +288,14 @@ Returns unified chart data (prices + indicators by date).
 |------|------|---------|-------------|
 | range | string | `ALL` | `1M`, `3M`, `6M`, `1Y`, `5Y`, `ALL` |
 | ma_periods | string | `10,15,20,50,100,200` | CSV periods parsed as integers |
+| macd_ma_type | string | `sma` | MACD mode: `sma` or `ema` |
 
 **Response:**
 ```json
 {
   "symbol": "BBCA",
   "range": "ALL",
+  "macd_ma_type": "sma",
   "data": [
     {
       "date": "2026-04-01",
@@ -304,10 +309,25 @@ Returns unified chart data (prices + indicators by date).
       "indicators": {
         "ma_20": 9025.5,
         "rsi_14": 58.42,
+        "macd_modes": {
+          "sma": {
+            "value": 45.3,
+            "signal": 42.1,
+            "histogram": 3.2,
+            "ma_type": "sma"
+          },
+          "ema": {
+            "value": 44.8,
+            "signal": 41.7,
+            "histogram": 3.1,
+            "ma_type": "ema"
+          }
+        },
         "macd": {
           "value": 45.3,
           "signal": 42.1,
-          "histogram": 3.2
+          "histogram": 3.2,
+          "ma_type": "sma"
         }
       }
     }
@@ -317,6 +337,9 @@ Returns unified chart data (prices + indicators by date).
 
 Notes:
 - Unknown `range` values currently fall back to `ALL` behavior.
+- Unknown `macd_ma_type` returns `400` with `detail`.
+- Legacy `macd` rows are treated as EMA during fallback selection.
+- `indicators.macd_modes` contains available SMA/EMA MACD payloads for client-side toggles.
 - Missing chart data returns 404 with `detail`.
 
 ---
@@ -393,7 +416,7 @@ Returns indicator history for one ticker.
 **Query Parameters:**
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| indicator_type | string | null | `sma`, `ema`, `macd`, `rsi`, `vwap` |
+| indicator_type | string | null | `sma`, `ema`, `macd`, `macd_sma`, `macd_ema`, `rsi`, `vwap` |
 | window_period | int | null | Period filter (e.g., 14, 20) |
 | limit | int | 100 | Max rows (<=500) |
 
@@ -443,7 +466,10 @@ Returns static supported indicator metadata.
       "type": "macd",
       "name": "MACD (Moving Average Convergence Divergence)",
       "default_periods": [9],
-      "params": {"fast": 12, "slow": 26}
+      "params": {"fast": 12, "slow": 26},
+      "modes": ["sma", "ema"],
+      "default_mode": "sma",
+      "storage_types": ["macd_sma", "macd_ema"]
     }
   ]
 }
@@ -474,6 +500,17 @@ Returns divergence events for chart overlays for a single ticker.
 - `aggressive_right_min <= aggressive_right_max`
 - `confirmed_right_min > aggressive_right_max` (no overlap)
 
+**Detection Notes:**
+- `p1` and `p2` are emitted only when RSI(14) at those anchors forms swing lows using `pivot_left_window` and the available right-window confirmation.
+- For aggressive events, right-window confirmation for RSI swing-low validation follows `aggressive_right_min/aggressive_right_max`; for confirmed events it follows `confirmed_right_min/confirmed_right_max`.
+- RSI line-of-sight is enforced between `p1` and `p2`: intermediate RSI values must not dip below the straight line connecting RSI(`p1`) to RSI(`p2`) (tolerance = 0.25).
+- **Three strategy tiers:**
+  - `BULLISH_CONFIRMED`: strict RSI swing lows for both p1 and p2, full right-window confirmation.
+  - `BULLISH_AGGRESSIVE`: fresh pivots (0-1 right bars), both anchors are strict RSI swing lows.
+  - `BULLISH_EMERGING`: relaxed p1 rule (allows one RSI bar in left window to be slightly lower), detects forming divergences earlier.
+- Aggressive and emerging events are invalidated if any later candle prints `low <= invalidation_level`.
+- `/screener/divergences` excludes invalidated aggressive/emerging events by default; set `include_invalidated=true` for audit mode.
+
 **Response:**
 ```json
 {
@@ -502,6 +539,30 @@ Returns divergence events for chart overlays for a single ticker.
       "signal_timestamp": 1775433600,
       "invalidation_level": null,
       "action": "Confirmed divergence setup"
+    },
+    {
+      "strategy_type": "BULLISH_EMERGING",
+      "type": "regular",
+      "logic_type": "regular",
+      "line_style": "dotted",
+      "color_hex": "#9333EA",
+      "grade": "neutral",
+      "confirmation_degree": 1,
+      "p1": {
+        "timestamp": 1775166000,
+        "low": 8800,
+        "rsi_14": 28.8
+      },
+      "p2": {
+        "timestamp": 1775433600,
+        "low": 8650,
+        "rsi_14": 35.2
+      },
+      "trough_timestamp": 1775433600,
+      "confirmation_timestamp": 1775433600,
+      "signal_timestamp": 1775433600,
+      "invalidation_level": 8650,
+      "action": "Emerging divergence - RSI anchor forming."
     }
   ]
 }
@@ -515,6 +576,7 @@ Returns recent divergence signals across market.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | days | int | 7 | Lookback window in days (1-30) |
+| include_invalidated | bool | false | Include invalidated aggressive events (audit mode) |
 | limit | int | 500 | Max rows (1-5000) |
 | pivot_left_window | int | 5 | Left bars required for pivot (1-20) |
 | confirmed_right_min | int | 2 | Confirmed min right bars (0-10) |
@@ -526,11 +588,13 @@ Returns recent divergence signals across market.
 ```json
 {
   "lookback_days": 7,
+  "include_invalidated": false,
   "count": 1,
   "results": [
     {
       "symbol": "BBCA",
       "name": "Bank Central Asia Tbk",
+      "is_invalidated": false,
       "strategy_type": "BULLISH_AGGRESSIVE",
       "type": "regular",
       "logic_type": "regular",
@@ -560,7 +624,147 @@ Returns recent divergence signals across market.
 
 ---
 
-## 8. Sync Operations
+## 8. Triangle Endpoints
+
+### GET /charts/{ticker_symbol}/triangles
+
+Returns triangle events for chart overlays for a single ticker.
+
+**Query Parameters:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| lookback_bars | int | 60 | Historical bars used for detection (30-180) |
+| pivot_left_window | int | 3 | Pivot-left bars (1-10) |
+| pivot_right_window | int | 1 | Pivot-right bars (0-10) |
+| breakout_relaxed | bool | false | If true, uses lower breakout buffer for higher breakout sensitivity |
+| include_potential | bool | true | Include potential-state events |
+| include_breakouts | bool | true | Include breakout-state events |
+| triangle_types | string(csv) | `symmetrical,ascending,descending` | Triangle type filter |
+| direction | string | `all` | `all`, `bullish`, `bearish` |
+| min_confidence | int | 0 | Confidence cutoff (0-100) |
+
+**Response:**
+```json
+{
+  "symbol": "BBCA",
+  "events": [
+    {
+      "triangle_type": "symmetrical",
+      "state": "breakout",
+      "breakout_direction": "bullish",
+      "line_style": "solid",
+      "color_hex": "#22C55E",
+      "confidence_level": "high",
+      "confidence_score": 82,
+      "upper_touch_count": 3,
+      "lower_touch_count": 2,
+      "total_touch_count": 5,
+      "breakout_close_count": 2,
+      "volume_ratio": 1.74,
+      "upper_line": {
+        "start_timestamp": 1772409600,
+        "start_price": 9050,
+        "end_timestamp": 1775001600,
+        "end_price": 8920
+      },
+      "lower_line": {
+        "start_timestamp": 1772409600,
+        "start_price": 8500,
+        "end_timestamp": 1775001600,
+        "end_price": 8850
+      },
+      "formation_start_timestamp": 1772409600,
+      "apex_timestamp": 1776124800,
+      "signal_timestamp": 1775251200,
+      "invalidation_level": 8850,
+      "action": "Bullish triangle breakout confirmed (2 closes)."
+    }
+  ]
+}
+```
+
+Possible errors:
+- `404`: `Ticker not found`
+- `400`: Invalid query parameter values
+
+### GET /screener/triangles
+
+Returns recent triangle signals across market.
+
+**Query Parameters:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| days | int | 7 | Lookback window in days (1-30) |
+| limit | int | 500 | Max rows (1-5000) |
+| index_code | string | null | Optional index scope |
+| state | string | `all` | `all`, `potential`, `breakout` |
+| direction | string | `all` | `all`, `bullish`, `bearish` |
+| triangle_types | string(csv) | `symmetrical,ascending,descending` | Triangle type filter |
+| min_confidence | int | 0 | Confidence cutoff (0-100) |
+| lookback_bars | int | 60 | Historical bars used for detection (30-180) |
+| pivot_left_window | int | 3 | Pivot-left bars (1-10) |
+| pivot_right_window | int | 1 | Pivot-right bars (0-10) |
+| breakout_relaxed | bool | false | If true, uses lower breakout buffer for higher breakout sensitivity |
+
+**Response:**
+```json
+{
+  "lookback_days": 7,
+  "count": 2,
+  "results": [
+    {
+      "symbol": "BBCA",
+      "name": "Bank Central Asia Tbk",
+      "triangle_type": "symmetrical",
+      "state": "breakout",
+      "breakout_direction": "bullish",
+      "line_style": "solid",
+      "color_hex": "#22C55E",
+      "confidence_level": "high",
+      "confidence_score": 82,
+      "upper_touch_count": 3,
+      "lower_touch_count": 2,
+      "total_touch_count": 5,
+      "breakout_close_count": 2,
+      "volume_ratio": 1.74,
+      "upper_line": {
+        "start_timestamp": 1772409600,
+        "start_price": 9050,
+        "end_timestamp": 1775001600,
+        "end_price": 8920
+      },
+      "lower_line": {
+        "start_timestamp": 1772409600,
+        "start_price": 8500,
+        "end_timestamp": 1775001600,
+        "end_price": 8850
+      },
+      "formation_start_timestamp": 1772409600,
+      "apex_timestamp": 1776124800,
+      "signal_timestamp": 1775251200,
+      "invalidation_level": 8850,
+      "action": "Bullish triangle breakout confirmed (2 closes)."
+    }
+  ]
+}
+```
+
+Detection notes:
+- Supports `symmetrical`, `ascending`, and `descending` triangle classification.
+- Event states: `potential` and `breakout`.
+- Breakout confidence progression uses consecutive closes beyond breakout boundary:
+  - 1 close: early breakout (medium baseline).
+  - 2+ closes: confirmed breakout (high baseline).
+- Volume acts only as a confidence bonus (`volume_ratio`), never as a hard breakout gate.
+- Screener sorting: newest `signal_timestamp` first, then breakout before potential, then higher confidence first.
+
+Possible errors:
+- `404`: `Index not found` when `index_code` is unknown/inactive
+- `400`: Invalid query parameter values
+
+---
+
+## 9. Sync Operations
 
 ### POST /sync/start
 
@@ -633,6 +837,30 @@ Stops an active sync job.
 }
 ```
 
+### POST /sync/migrate-macd
+
+Migrates legacy MACD storage and backfills selectable EMA/SMA datasets.
+
+**Query Parameters:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| index_code | string | No | Optional index code scope |
+| include_inactive | bool | No | Include inactive tickers (default `false`) |
+
+**Response:**
+```json
+{
+  "index_code": "JCI",
+  "include_inactive": false,
+  "tickers_processed": 850,
+  "legacy_rows_migrated": 123456,
+  "duplicate_legacy_rows_removed": 0,
+  "macd_sma_added": 120000,
+  "macd_ema_added": 118000,
+  "message": "MACD mode migration completed"
+}
+```
+
 ### POST /sync/init-index
 
 Creates an index record for sync operations.
@@ -666,7 +894,7 @@ Returns per-ticker sync status summary.
 
 ---
 
-## 9. Health and Root
+## 10. Health and Root
 
 ### GET /health
 ```json
@@ -683,7 +911,7 @@ Returns per-ticker sync status summary.
 
 ---
 
-## 10. Error Responses
+## 11. Error Responses
 
 Standard error format:
 
@@ -740,6 +968,7 @@ Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`.
 - Ticker list: `GET /tickers`
 - Ticker details + chart: `GET /tickers/{symbol}`, `GET /tickers/{symbol}/chart`
 - Divergences: `GET /charts/{ticker_symbol}/divergences`, `GET /screener/divergences`
+- Triangles: `GET /charts/{ticker_symbol}/triangles`, `GET /screener/triangles`
 
 ---
 
@@ -747,6 +976,14 @@ Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2026-04-28 | Stable triangle feature release: Full documentation of `/charts/{ticker_symbol}/triangles` and `/screener/triangles` endpoints with triangle-type (symmetrical, ascending, descending), state (potential, breakout), direction (bullish, bearish), confidence progression (1-2+ closes), volume ratio, and all supporting query parameters. Triangle detection is on-demand from existing `prices` data (no schema changes). Frontend integration complete with ticker chart overlays and screener mode switching. |
+| 1.0.7 | 2026-04-18 | Added optional `breakout_relaxed` query param to triangle endpoints (`/charts/{ticker_symbol}/triangles`, `/screener/triangles`) to use lower breakout buffer and increase breakout sensitivity. Also fixed triangle formation validation window so boundary fitting excludes most recent bars; this enables valid breakout detection instead of suppressing breakout states. |
+| 1.0.6 | 2026-04-18 | Added triangle credibility metrics to triangle event payloads: `upper_touch_count`, `lower_touch_count`, and `total_touch_count` for both ticker and screener triangle endpoints. |
+| 1.0.5 | 2026-04-17 | Added triangle pattern APIs: `GET /charts/{ticker_symbol}/triangles` and `GET /screener/triangles` with triangle-type/state/direction filters, confidence scoring, breakout close count progression, and volume-ratio confidence bonus semantics. Documented index filter behavior (`404` on unknown `index_code`). |
+| 1.0.4 | 2026-04-15 | Tightened aggressive invalidation rule: events are now invalidated when any later candle prints `low <= invalidation_level` (equal lows now invalidate). |
+| 1.0.3 | 2026-04-15 | Added screener audit mode via `include_invalidated` query param on `/screener/divergences`; response now includes `include_invalidated` and per-row `is_invalidated` to support invalidated aggressive signal review. |
+| 1.0.2 | 2026-04-14 | Added `indicators.macd_modes` (SMA/EMA payload map) to `/tickers/{symbol}/chart` so clients can switch MACD mode locally without refetching; `indicators.macd` remains the selected/fallback MACD payload. |
+| 1.0.1 | 2026-04-14 | Added selectable MACD mode support with chart query param `macd_ma_type` (default `sma`), documented `macd.ma_type` response field, expanded indicator type docs (`macd_sma`, `macd_ema`), and added `/sync/migrate-macd` for legacy MACD migration/backfill workflows. |
 | 1.0.0 | 2026-04-10 | First stable contract release. Consolidated all implemented endpoints in docs (`/prices/*`, `/indicators/*`, sync operational routes), aligned ticker details with `industry`, documented screener dual response modes, and formalized sync status normalization (`running` -> `in_progress`). |
 | 0.2.6 | 2026-04-10 | Added configurable divergence detection parameters: `pivot_left_window`, `confirmed_right_min`, `confirmed_right_max`, `aggressive_right_min`, `aggressive_right_max` to `/charts/{ticker_symbol}/divergences` and `/screener/divergences`. Added `confirmation_degree` field to divergence event responses. Events now return full structure with `p1`, `p2`, `color_hex`, `line_style`, and `action` fields. |
 | 0.2.5 | 2026-04-10 | Aligned docs to implementation: `/sync/start` query params, ticker pagination defaults (`offset`/`skip`, `limit=50`, sorting), ticker error format (`detail`), chart defaults (`range=ALL`, expanded MA defaults), root version (`0.2.0`), and documented divergence endpoints (`/charts/{ticker_symbol}/divergences`, `/screener/divergences`). Standardized examples to `JCI`. |

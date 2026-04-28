@@ -108,6 +108,10 @@ def get_divergence_screener(
         le=30,
         description="Return divergence signals within the last N days",
     ),
+    include_invalidated: bool = Query(
+        False,
+        description="Include invalidated aggressive events for audit mode",
+    ),
     limit: int = Query(
         500,
         ge=1,
@@ -155,13 +159,17 @@ def get_divergence_screener(
     )
 
     detector = DivergenceDetectorService(db, config=config)
-    results = detector.detect_recent_market_divergences(days=days)
+    results = detector.detect_recent_market_divergences(
+        days=days,
+        include_invalidated=include_invalidated,
+    )
 
     if limit:
         results = results[:limit]
 
     return {
         "lookback_days": days,
+        "include_invalidated": include_invalidated,
         "count": len(results),
         "results": results,
     }

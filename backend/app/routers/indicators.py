@@ -14,7 +14,7 @@ def get_indicators(
     ticker_symbol: str,
     indicator_type: Optional[str] = Query(
         None,
-        description="Filter by indicator type: sma, ema, macd, rsi, vwap"
+        description="Filter by indicator type: sma, ema, macd, macd_sma, macd_ema, rsi, vwap"
     ),
     window_period: Optional[int] = Query(
         None,
@@ -27,7 +27,7 @@ def get_indicators(
     Get technical indicators for a ticker.
 
     - **ticker_symbol**: Stock symbol (e.g., 'BBCA')
-    - **indicator_type**: Optional filter - sma, ema, macd, rsi, vwap
+    - **indicator_type**: Optional filter - sma, ema, macd, macd_sma, macd_ema, rsi, vwap
     - **window_period**: Optional filter for MA periods
     """
     ticker = db.query(Ticker).filter(Ticker.symbol == ticker_symbol.upper()).first()
@@ -39,7 +39,11 @@ def get_indicators(
     )
 
     if indicator_type:
-        query = query.filter(TechnicalIndicator.indicator_type == indicator_type.lower())
+        normalized_type = indicator_type.lower()
+        if normalized_type == "macd":
+            query = query.filter(TechnicalIndicator.indicator_type.in_(["macd", "macd_sma", "macd_ema"]))
+        else:
+            query = query.filter(TechnicalIndicator.indicator_type == normalized_type)
 
     if window_period:
         query = query.filter(TechnicalIndicator.window_period == window_period)
@@ -126,7 +130,10 @@ def get_available_indicator_types():
                 "type": "macd",
                 "name": "MACD (Moving Average Convergence Divergence)",
                 "default_periods": [9],  # Signal line period
-                "params": {"fast": 12, "slow": 26}
+                "params": {"fast": 12, "slow": 26},
+                "modes": ["sma", "ema"],
+                "default_mode": "sma",
+                "storage_types": ["macd_sma", "macd_ema"],
             },
             {
                 "type": "rsi",

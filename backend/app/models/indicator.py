@@ -11,7 +11,7 @@ class TechnicalIndicator(Base):
     id = Column(Integer, primary_key=True, index=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"), nullable=False, index=True)
     date = Column(Date, nullable=False, index=True)
-    indicator_type = Column(String(30), nullable=False, index=True)  # e.g., 'sma', 'ema', 'rsi', 'macd_line', etc.
+    indicator_type = Column(String(30), nullable=False, index=True)  # e.g., 'sma', 'ema', 'rsi', 'macd_sma', 'macd_ema'
     window_period = Column(Integer, nullable=True)  # For MA: 5, 10, 15, 20, 50, 100, 200; For RSI: 14; For MACD: null
     value = Column(Float, nullable=False)
     extra_data = Column(String(500))  # JSON for additional data (MACD signal, histogram)

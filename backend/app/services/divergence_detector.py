@@ -17,11 +17,15 @@ DEFAULT_AGGRESSIVE_RIGHT_MIN = 0
 DEFAULT_AGGRESSIVE_RIGHT_MAX = 1
 MAX_LOOKBACK_BARS = 60
 RSI_WINDOW_PERIOD = 14
+RSI_LINE_OF_SIGHT_TOLERANCE = 0.25
 SCREENER_RECENT_BARS = 220
 STRATEGY_CONFIRMED = "BULLISH_CONFIRMED"
 STRATEGY_AGGRESSIVE = "BULLISH_AGGRESSIVE"
+STRATEGY_EMERGING = "BULLISH_EMERGING"
 AGGRESSIVE_COLOR_HEX = "#FFBF00"
+EMERGING_COLOR_HEX = "#9333EA"
 ACTION_HINT_AGGRESSIVE = "Potential Bottom - Monitor for Open Entry."
+ACTION_HINT_EMERGING = "Emerging divergence - RSI anchor forming."
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,7 @@ class DivergenceConfig:
 class PriceRsiPoint:
     date: date
     low: float
+    close: float
     rsi: float
 
 
@@ -53,7 +58,13 @@ class DivergenceDetectorService:
 
     @staticmethod
     def _strategy_priority(strategy_type: str) -> int:
-        return 0 if strategy_type == STRATEGY_AGGRESSIVE else 1
+        # Return lower number for higher priority (sorts first)
+        if strategy_type == STRATEGY_AGGRESSIVE:
+            return 0
+        elif strategy_type == STRATEGY_CONFIRMED:
+            return 1
+        else:  # STRATEGY_EMERGING or unknown
+            return 2
 
     def _fetch_joined_price_rsi(
         self,
@@ -63,6 +74,7 @@ class DivergenceDetectorService:
         query = self.db.query(
             DailyPrice.date.label("date"),
             DailyPrice.low.label("low"),
+            DailyPrice.close.label("close"),
             TechnicalIndicator.value.label("rsi"),
         ).join(
             TechnicalIndicator,
@@ -85,9 +97,11 @@ class DivergenceDetectorService:
 
         points: List[PriceRsiPoint] = []
         for row in rows:
-            if row.low is None or row.rsi is None:
+            if row.low is None or row.rsi is None or row.close is None:
                 continue
-            points.append(PriceRsiPoint(date=row.date, low=float(row.low), rsi=float(row.rsi)))
+            points.append(
+                PriceRsiPoint(date=row.date, low=float(row.low), close=float(row.close), rsi=float(row.rsi))
+            )
 
         return points
 
@@ -168,11 +182,13 @@ class DivergenceDetectorService:
             "p1": {
                 "timestamp": self._to_unix_seconds(p1.date),
                 "low": p1.low,
+                "close": p1.close,
                 "rsi_14": p1.rsi,
             },
             "p2": {
                 "timestamp": self._to_unix_seconds(p2.date),
                 "low": p2.low,
+                "close": p2.close,
                 "rsi_14": p2.rsi,
             },
             "trough_timestamp": self._to_unix_seconds(p2.date),
@@ -194,7 +210,6 @@ class DivergenceDetectorService:
         p2 = points[p2_index]
         signal_timestamp = self._to_unix_seconds(p2.date)
         grade = "oversold" if p2.rsi <= 30 else "neutral"
-
         return {
             "strategy_type": STRATEGY_AGGRESSIVE,
             "type": divergence_type,
@@ -206,19 +221,157 @@ class DivergenceDetectorService:
             "p1": {
                 "timestamp": self._to_unix_seconds(p1.date),
                 "low": p1.low,
+                "close": p1.close,
                 "rsi_14": p1.rsi,
             },
             "p2": {
                 "timestamp": signal_timestamp,
                 "low": p2.low,
+                "close": p2.close,
                 "rsi_14": p2.rsi,
             },
             "trough_timestamp": signal_timestamp,
             "confirmation_timestamp": signal_timestamp,
             "signal_timestamp": signal_timestamp,
-            "invalidation_level": p2.low,
+            "invalidation_level": p2.close,
             "action": ACTION_HINT_AGGRESSIVE,
         }
+
+    def _build_emerging_event(
+        self,
+        points: List[PriceRsiPoint],
+        p1_index: int,
+        p2_index: int,
+        divergence_type: str,
+        confirmation_degree: int,
+    ) -> Dict[str, object]:
+        p1 = points[p1_index]
+        p2 = points[p2_index]
+        signal_timestamp = self._to_unix_seconds(p2.date)
+        grade = "oversold" if p2.rsi <= 30 else "neutral"
+        return {
+            "strategy_type": STRATEGY_EMERGING,
+            "type": divergence_type,
+            "logic_type": divergence_type,
+            "line_style": "dotted",
+            "color_hex": EMERGING_COLOR_HEX,
+            "grade": grade,
+            "confirmation_degree": confirmation_degree,
+            "p1": {
+                "timestamp": self._to_unix_seconds(p1.date),
+                "low": p1.low,
+                "close": p1.close,
+                "rsi_14": p1.rsi,
+            },
+            "p2": {
+                "timestamp": signal_timestamp,
+                "low": p2.low,
+                "close": p2.close,
+                "rsi_14": p2.rsi,
+            },
+            "trough_timestamp": signal_timestamp,
+            "confirmation_timestamp": signal_timestamp,
+            "signal_timestamp": signal_timestamp,
+            "invalidation_level": p2.close,
+            "action": ACTION_HINT_EMERGING,
+        }
+
+    def _is_rsi_swing_low(
+        self,
+        points: List[PriceRsiPoint],
+        index: int,
+        right_window: int,
+    ) -> bool:
+        left_window = self.config.pivot_left_window
+
+        if index < left_window:
+            return False
+
+        rsi_values = [point.rsi for point in points]
+        candidate = rsi_values[index]
+        left_values = rsi_values[index - left_window:index]
+
+        if not all(candidate <= value for value in left_values):
+            return False
+
+        if right_window <= 0:
+            return True
+
+        right_end = min(len(points), index + right_window + 1)
+        right_values = rsi_values[index + 1:right_end]
+        return all(candidate <= value for value in right_values)
+
+    def _is_rsi_near_swing_low(
+        self,
+        points: List[PriceRsiPoint],
+        index: int,
+        right_window: int,
+        allowed_violations: int = 1,
+    ) -> bool:
+        """Check if index is a swing low allowing some left-window RSI bars to be slightly lower."""
+        left_window = self.config.pivot_left_window
+
+        if index < left_window:
+            return False
+
+        rsi_values = [point.rsi for point in points]
+        candidate = rsi_values[index]
+        left_values = rsi_values[index - left_window:index]
+
+        # Count how many left bars are lower than candidate
+        violations = sum(1 for v in left_values if v < candidate)
+        if violations > allowed_violations:
+            return False
+
+        # Right-window check: still require all right bars to be >= candidate
+        if right_window <= 0:
+            return True
+
+        right_end = min(len(points), index + right_window + 1)
+        right_values = rsi_values[index + 1:right_end]
+        return all(candidate <= value for value in right_values)
+
+    def _has_rsi_line_of_sight(
+        self,
+        points: List[PriceRsiPoint],
+        p1_index: int,
+        p2_index: int,
+    ) -> bool:
+        """Check RSI line-of-sight using the configured tolerance."""
+        return self._check_rsi_line_of_sight(points, p1_index, p2_index, RSI_LINE_OF_SIGHT_TOLERANCE)
+
+    def _has_rsi_line_of_sight_emerging(
+        self,
+        points: List[PriceRsiPoint],
+        p1_index: int,
+        p2_index: int,
+        tolerance: float,
+    ) -> bool:
+        """Check RSI line-of-sight using a custom tolerance for emerging signals."""
+        return self._check_rsi_line_of_sight(points, p1_index, p2_index, tolerance)
+
+    def _check_rsi_line_of_sight(
+        self,
+        points: List[PriceRsiPoint],
+        p1_index: int,
+        p2_index: int,
+        tolerance: float,
+    ) -> bool:
+        """Helper to check RSI line-of-sight with a given tolerance."""
+        span = p2_index - p1_index
+        if span <= 1:
+            return True
+
+        p1_rsi = points[p1_index].rsi
+        p2_rsi = points[p2_index].rsi
+
+        for idx in range(p1_index + 1, p2_index):
+            progress = (idx - p1_index) / span
+            line_rsi = p1_rsi + ((p2_rsi - p1_rsi) * progress)
+            if points[idx].rsi < (line_rsi - tolerance):
+                return False
+
+        return True
 
     def _detect_divergence_events(
         self,
@@ -228,14 +381,28 @@ class DivergenceDetectorService:
         is_aggressive: bool,
     ) -> List[Dict[str, object]]:
         events: List[Dict[str, object]] = []
+        p1_rsi_swing_low_cache: Dict[int, bool] = {}
 
         for p2_index, right_count in recent_pivots:
+            if not self._is_rsi_swing_low(points, p2_index, right_window=right_count):
+                continue
+
             p2 = points[p2_index]
 
             for p1_index in historical_pivots:
                 if p1_index >= p2_index:
                     continue
                 if p2_index - p1_index > MAX_LOOKBACK_BARS:
+                    continue
+
+                if p1_index not in p1_rsi_swing_low_cache:
+                    p1_rsi_swing_low_cache[p1_index] = self._is_rsi_swing_low(
+                        points,
+                        p1_index,
+                        right_window=self.config.pivot_left_window,
+                    )
+
+                if not p1_rsi_swing_low_cache[p1_index]:
                     continue
 
                 p1 = points[p1_index]
@@ -247,6 +414,9 @@ class DivergenceDetectorService:
                     divergence_type = "hidden"
 
                 if divergence_type is None:
+                    continue
+
+                if not self._has_rsi_line_of_sight(points, p1_index, p2_index):
                     continue
 
                 if is_aggressive:
@@ -261,12 +431,126 @@ class DivergenceDetectorService:
 
         return events
 
+    def _detect_emerging_divergence_events(
+        self,
+        points: List[PriceRsiPoint],
+        historical_pivots: List[int],
+        recent_pivots: List[Tuple[int, int]],
+    ) -> List[Dict[str, object]]:
+        """Detect emerging divergences with relaxed RSI swing-low rules (allows 2-3 violations).
+        
+        Emerging signals allow p2 to be from either recent or historical pivots, with relaxed
+        RSI swing-low validation to catch divergences where anchors are still forming.
+        """
+        events: List[Dict[str, object]] = []
+        p1_near_swing_low_cache: Dict[int, bool] = {}
+        strict_pairs = set()
+        
+        EMERGING_ALLOWED_VIOLATIONS = 3
+        EMERGING_LOO_TOLERANCE = 0.40  # More lenient for emerging
+
+        # Build a set of (p1, p2) pairs that already qualified as strict to avoid duplicates
+        for p2_index, right_count in recent_pivots:
+            if not self._is_rsi_swing_low(points, p2_index, right_window=right_count):
+                continue
+            for p1_index in historical_pivots:
+                if p1_index >= p2_index or p2_index - p1_index > MAX_LOOKBACK_BARS:
+                    continue
+                if self._is_rsi_swing_low(points, p1_index, right_window=self.config.pivot_left_window):
+                    strict_pairs.add((p1_index, p2_index))
+
+        # Combine recent and historical pivots for emerging p2 candidates
+        all_p2_candidates: List[Tuple[int, int]] = []
+        for idx, rc in recent_pivots:
+            all_p2_candidates.append((idx, rc))
+        for idx in historical_pivots:
+            # Estimate right_count for historical pivots (already >= 5)
+            all_p2_candidates.append((idx, 5))
+
+        for p2_index, right_count in all_p2_candidates:
+            # For emerging, allow more RSI violations (up to 3 in left window)
+            if not self._is_rsi_near_swing_low(points, p2_index, right_window=right_count, allowed_violations=EMERGING_ALLOWED_VIOLATIONS):
+                continue
+
+            p2 = points[p2_index]
+
+            for p1_index in historical_pivots:
+                if p1_index >= p2_index:
+                    continue
+                if p2_index - p1_index > MAX_LOOKBACK_BARS:
+                    continue
+                if (p1_index, p2_index) in strict_pairs:
+                    # Skip if already caught by strict rules
+                    continue
+
+                if p1_index not in p1_near_swing_low_cache:
+                    p1_near_swing_low_cache[p1_index] = self._is_rsi_near_swing_low(
+                        points,
+                        p1_index,
+                        right_window=self.config.pivot_left_window,
+                        allowed_violations=EMERGING_ALLOWED_VIOLATIONS,
+                    )
+
+                if not p1_near_swing_low_cache[p1_index]:
+                    continue
+
+                p1 = points[p1_index]
+                divergence_type: Optional[str] = None
+
+                if p2.low < p1.low and p2.rsi > p1.rsi:
+                    divergence_type = "regular"
+                elif p2.low > p1.low and p2.rsi < p1.rsi:
+                    divergence_type = "hidden"
+
+                if divergence_type is None:
+                    continue
+
+                # Use more lenient line-of-sight for emerging divergences
+                if not self._has_rsi_line_of_sight_emerging(points, p1_index, p2_index, EMERGING_LOO_TOLERANCE):
+                    continue
+
+                event = self._build_emerging_event(
+                    points, p1_index, p2_index, divergence_type, right_count
+                )
+                events.append(event)
+
+        return events
+
+
+    def _is_aggressive_event_invalidated(
+        self,
+        points: List[PriceRsiPoint],
+        event: Dict[str, object],
+    ) -> bool:
+        if str(event.get("strategy_type")) != STRATEGY_AGGRESSIVE:
+            return False
+
+        invalidation_level_raw = event.get("invalidation_level")
+        signal_timestamp_raw = event.get("signal_timestamp")
+
+        if invalidation_level_raw is None or signal_timestamp_raw is None:
+            return False
+
+        invalidation_level = float(invalidation_level_raw)
+        signal_timestamp = int(signal_timestamp_raw)
+
+        for point in points:
+            if self._to_unix_seconds(point.date) <= signal_timestamp:
+                continue
+            if point.close <= invalidation_level:
+                return True
+
+        return False
+
     def detect_for_ticker(
         self,
         ticker_id: int,
         limit_bars: Optional[int] = None,
+        points: Optional[List[PriceRsiPoint]] = None,
     ) -> List[Dict[str, object]]:
-        points = self._fetch_joined_price_rsi(ticker_id=ticker_id, limit_bars=limit_bars)
+        if points is None:
+            points = self._fetch_joined_price_rsi(ticker_id=ticker_id, limit_bars=limit_bars)
+
         if not points:
             return []
 
@@ -285,6 +569,11 @@ class DivergenceDetectorService:
         )
         events.extend(aggressive_events)
 
+        emerging_events = self._detect_emerging_divergence_events(
+            points, historical_pivots, confirmed_pivots + aggressive_pivots
+        )
+        events.extend(emerging_events)
+
         events.sort(
             key=lambda event: (
                 int(event["signal_timestamp"]),
@@ -293,7 +582,11 @@ class DivergenceDetectorService:
         )
         return events
 
-    def detect_recent_market_divergences(self, days: int = 7) -> List[Dict[str, object]]:
+    def detect_recent_market_divergences(
+        self,
+        days: int = 7,
+        include_invalidated: bool = False,
+    ) -> List[Dict[str, object]]:
         cutoff_timestamp = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
         tickers = (
             self.db.query(Ticker.id, Ticker.symbol, Ticker.name)
@@ -304,11 +597,25 @@ class DivergenceDetectorService:
         results: List[Dict[str, object]] = []
 
         for ticker in tickers:
-            ticker_events = self.detect_for_ticker(
+            points = self._fetch_joined_price_rsi(
                 ticker_id=ticker.id,
                 limit_bars=SCREENER_RECENT_BARS,
             )
+
+            if not points:
+                continue
+
+            ticker_events = self.detect_for_ticker(
+                ticker_id=ticker.id,
+                limit_bars=SCREENER_RECENT_BARS,
+                points=points,
+            )
+
             for event in ticker_events:
+                is_invalidated = self._is_aggressive_event_invalidated(points, event)
+                if is_invalidated and not include_invalidated:
+                    continue
+
                 signal_timestamp = int(event["signal_timestamp"])
                 if signal_timestamp < cutoff_timestamp:
                     continue
@@ -317,6 +624,7 @@ class DivergenceDetectorService:
                     {
                         "symbol": ticker.symbol,
                         "name": ticker.name,
+                        "is_invalidated": is_invalidated,
                         **event,
                     }
                 )

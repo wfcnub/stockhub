@@ -1,4 +1,5 @@
 from typing import List
+
 import pandas as pd
 
 from .base import BaseIndicator, IndicatorResult
@@ -10,36 +11,55 @@ class MACD(BaseIndicator):
     """
     Moving Average Convergence Divergence (MACD) indicator.
 
-    MACD shows the relationship between two exponential moving averages of prices.
+    MACD shows the relationship between two moving averages of prices.
 
     Components:
-    - MACD Line: EMA(12) - EMA(26)
-    - Signal Line: EMA(9) of MACD Line
+    - MACD Line: MA(12) - MA(26)
+    - Signal Line: MA(9) of MACD Line
     - Histogram: MACD Line - Signal Line
 
-    Default parameters (12, 26, 9) are standard for daily charts.
+    MA type is configurable (`sma` or `ema`) and defaults to `sma`.
+    Default periods (12, 26, 9) are a common baseline for daily charts.
     """
 
     name = "macd"
     required_columns = ["close"]
 
-    def __init__(self, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9):
+    def __init__(
+        self,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+        ma_type: str = "sma",
+    ):
         """
         Initialize MACD indicator.
 
         Args:
-            fast_period: Period for fast EMA (default: 12)
-            slow_period: Period for slow EMA (default: 26)
-            signal_period: Period for signal line EMA (default: 9)
+            fast_period: Period for fast MA (default: 12)
+            slow_period: Period for slow MA (default: 26)
+            signal_period: Period for signal line MA (default: 9)
+            ma_type: Moving-average type: `sma` or `ema` (default: sma)
         """
         super().__init__()
+        normalized_ma_type = (ma_type or "sma").lower()
+        if normalized_ma_type not in {"sma", "ema"}:
+            raise ValueError("ma_type must be either 'sma' or 'ema'")
+
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.signal_period = signal_period
+        self.ma_type = normalized_ma_type
 
     def get_required_history_days(self) -> int:
-        # Need enough data for slow EMA to stabilize + signal EMA
+        # Need enough data for slow MA window + signal MA window
         return self.slow_period + self.signal_period + 10
+
+    def _moving_average(self, series: pd.Series, period: int) -> pd.Series:
+        if self.ma_type == "ema":
+            return series.ewm(span=period, adjust=False).mean()
+
+        return series.rolling(window=period, min_periods=period).mean()
 
     def calculate(self, df: pd.DataFrame) -> List[IndicatorResult]:
         """
@@ -53,20 +73,20 @@ class MACD(BaseIndicator):
         """
         df = self.prepare_dataframe(df)
 
-        # Calculate fast and slow EMAs
-        fast_ema = df['close'].ewm(span=self.fast_period, adjust=False).mean()
-        slow_ema = df['close'].ewm(span=self.slow_period, adjust=False).mean()
+        # Calculate fast and slow moving averages using configured mode.
+        fast_ma = self._moving_average(df['close'], self.fast_period)
+        slow_ma = self._moving_average(df['close'], self.slow_period)
 
         # MACD Line
-        macd_line = fast_ema - slow_ema
+        macd_line = fast_ma - slow_ma
 
-        # Signal Line (9-period EMA of MACD Line)
-        signal_line = macd_line.ewm(span=self.signal_period, adjust=False).mean()
+        # Signal Line (9-period moving average of MACD Line)
+        signal_line = self._moving_average(macd_line, self.signal_period)
 
         # Histogram
         histogram = macd_line - signal_line
 
-        # Need enough data for slow EMA + signal EMA to stabilize
+        # Need enough data for slow MA + signal MA windows
         min_idx = self.slow_period + self.signal_period - 2
 
         results = []
@@ -77,7 +97,8 @@ class MACD(BaseIndicator):
                     value=float(macd_line.iloc[idx]),
                     metadata={
                         "signal": float(signal_line.iloc[idx]),
-                        "histogram": float(histogram.iloc[idx])
+                        "histogram": float(histogram.iloc[idx]),
+                        "ma_type": self.ma_type,
                     }
                 ))
 
