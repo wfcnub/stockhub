@@ -3,12 +3,16 @@
 import { useEffect, useRef } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
-import type { ChartDataPoint } from '@/types';
+import type { ChartDataPoint, MACDMovingAverageType } from '@/types';
 import { getChartThemeColors } from '@/lib/chartTheme';
 
 interface IndicatorsChartProps {
   data: ChartDataPoint[];
   height?: number;
+}
+
+interface MACDChartProps extends IndicatorsChartProps {
+  mode?: MACDMovingAverageType;
 }
 
 export function RSIChart({ data, height = 150 }: IndicatorsChartProps) {
@@ -116,7 +120,7 @@ export function RSIChart({ data, height = 150 }: IndicatorsChartProps) {
   );
 }
 
-export function MACDChart({ data, height = 150 }: IndicatorsChartProps) {
+export function MACDChart({ data, height = 150, mode = 'sma' }: MACDChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const { resolvedTheme } = useTheme();
@@ -216,7 +220,7 @@ export function MACDChart({ data, height = 150 }: IndicatorsChartProps) {
   return (
     <div className="hud-panel p-4">
       <div className="flex justify-between items-center mb-2">
-        <h4 className="text-sm font-medium text-gemini-text-secondary">MACD</h4>
+        <h4 className="text-sm font-medium text-gemini-text-secondary">MACD ({mode.toUpperCase()})</h4>
         <div className="flex items-center gap-4 text-xs text-gemini-text-tertiary">
           <div className="flex items-center gap-1">
             <div className="w-3 h-0.5 rounded bg-gemini-accent-purple" />

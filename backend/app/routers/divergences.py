@@ -73,6 +73,10 @@ def get_ticker_divergences(
         le=10,
         description="Maximum right bars for an aggressive pivot",
     ),
+    include_invalidated: bool = Query(
+        False,
+        description="Include invalidated aggressive/emerging events",
+    ),
     db: Session = Depends(get_db),
 ):
     ticker = db.query(Ticker).filter(
@@ -92,10 +96,19 @@ def get_ticker_divergences(
     )
 
     detector = DivergenceDetectorService(db, config=config)
-    events = detector.detect_for_ticker(ticker.id)
+    raw_events = detector.detect_for_ticker(ticker.id)
+    points = detector._fetch_joined_price_rsi(ticker_id=ticker.id, limit_bars=None)
+
+    events = []
+    for event in raw_events:
+        is_invalidated = detector._is_event_invalidated(points, event)
+        if is_invalidated and not include_invalidated:
+            continue
+        events.append({**event, "is_invalidated": is_invalidated})
 
     return {
         "symbol": ticker.symbol,
+        "include_invalidated": include_invalidated,
         "events": events,
     }
 
@@ -107,6 +120,10 @@ def get_divergence_screener(
         ge=1,
         le=30,
         description="Return divergence signals within the last N days",
+    ),
+    include_invalidated: bool = Query(
+        False,
+        description="Include invalidated aggressive events for audit mode",
     ),
     limit: int = Query(
         500,
@@ -155,13 +172,17 @@ def get_divergence_screener(
     )
 
     detector = DivergenceDetectorService(db, config=config)
-    results = detector.detect_recent_market_divergences(days=days)
+    results = detector.detect_recent_market_divergences(
+        days=days,
+        include_invalidated=include_invalidated,
+    )
 
     if limit:
         results = results[:limit]
 
     return {
         "lookback_days": days,
+        "include_invalidated": include_invalidated,
         "count": len(results),
         "results": results,
     }

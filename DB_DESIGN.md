@@ -1,4 +1,4 @@
-# StockHub Database Design (v1.0.0)
+# StockHub Database Design (v1.1.0)
 
 > **Source of Truth** - This document defines the database schema. PostgreSQL is the recommended engine to leverage time-series performance and JSONB support for error logging.
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-StockHub uses a relational schema optimized for financial time-series workloads. **Key Metrics** are modeled as a time-series table to track valuation changes over time (not just the latest snapshot). The v1.0.0 documentation pass confirms alignment with active ORM models, including per-ticker sync health in `sync_status`, full OHLCV history in `prices`, indicator overlays in `technical_indicators`, and batch workflow progress in `sync_jobs`.
+StockHub uses a relational schema optimized for financial time-series workloads. **Key Metrics** are modeled as a time-series table to track valuation changes over time (not just the latest snapshot). The v1.1.0 documentation pass confirms alignment with active ORM models, including per-ticker sync health in `sync_status`, full OHLCV history in `prices`, indicator overlays in `technical_indicators`, batch workflow progress in `sync_jobs`, and on-demand triangle pattern detection from existing `prices` data.
 
 ---
 
@@ -177,13 +177,18 @@ Stores technical indicator values used by chart overlays and momentum panels.
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
 | ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
 | date | DATE | NOT NULL | Trading day |
-| indicator_type | VARCHAR(30) | NOT NULL | e.g., sma, ema, rsi, macd |
+| indicator_type | VARCHAR(30) | NOT NULL | e.g., sma, ema, rsi, macd_sma, macd_ema (legacy rows may use macd) |
 | window_period | INTEGER | NULL | For windowed indicators (e.g., SMA 20, RSI 14) |
 | value | FLOAT | NOT NULL | Main indicator value |
-| extra_data | VARCHAR(500) | NULL | JSON string for extra values (e.g., MACD signal/histogram) |
+| extra_data | VARCHAR(500) | NULL | JSON string for extra values (e.g., MACD signal/histogram/ma_type) |
 | created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
 
 **Composite Index:** `ix_ticker_indicator_date (ticker_id, indicator_type, date)` for fast chart queries.
+
+**MACD storage conventions:**
+- `macd_sma`: MACD values computed with SMA-based lines/signals.
+- `macd_ema`: MACD values computed with EMA-based lines/signals.
+- Legacy `macd` rows are treated as EMA until migrated.
 
 ---
 
@@ -344,6 +349,8 @@ CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2026-04-28 | Triangle pattern feature complete: on-demand detection for symmetrical, ascending, and descending triangles with potential and breakout states via `/charts/{ticker_symbol}/triangles` and `/screener/triangles` APIs. No schema changes; detection runs on-demand from existing `prices` data. |
+| 1.0.1 | 2026-04-14 | Documented MACD mode-aware storage conventions in `technical_indicators` using `indicator_type` values `macd_sma` and `macd_ema`, plus legacy `macd` compatibility during migration/backfill. |
 | 1.0.0 | 2026-04-10 | First stable schema release docs. Confirmed ORM alignment for all active tables/constraints, clarified sync job status compatibility (`running` legacy mapped to `in_progress` at API layer), and corrected `technical_indicators.ticker_id` as NOT NULL in table docs. |
 | 0.2.3 | 2026-04-10 | Aligned schema docs to active models: added `sync_status` table, updated `prices`/`technical_indicators` IDs to integer auto-increment, adjusted nullable fields and float types, documented `key_metrics` unique constraint (`ticker_id`, `observation_date`), and expanded `sync_jobs` statuses plus `error_message`. |
 | 0.2.2 | 2026-04-07 | Added `technical_indicators` table to schema docs (columns, relationships, SQL DDL, and performance indexes) |

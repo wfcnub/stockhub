@@ -1,6 +1,6 @@
-# StockHub (v1.0.0)
+# StockHub (v1.1.0)
 
-StockHub is a stock analysis platform with historical price data, technical indicators, sync orchestration, and divergence screening. It currently supports Jakarta Composite Index (IDX) and is designed to be extended to additional indexes/exchanges.
+StockHub is a stock analysis platform with historical price data, technical indicators, sync orchestration, divergence screening, and triangle pattern screening. It currently supports Jakarta Composite Index (IDX) and is designed to be extended to additional indexes/exchanges.
 
 ## Tech Stack
 
@@ -33,8 +33,8 @@ stockhub/
 │   │   ├── lib/               # API client
 │   │   └── types/             # TypeScript contract types
 │   └── package.json
-├── API_CONTRACT.md            # API contract v1.0.0
-├── DB_DESIGN.md               # Database design v1.0.0
+├── API_CONTRACT.md            # API contract v1.1.0
+├── DB_DESIGN.md               # Database design v1.1.0
 ├── AGENTS.md                  # Agent workflow and guardrails
 ├── start.sh                   # Quick start script (all services)
 ├── stop.sh                    # Stop local services
@@ -96,7 +96,7 @@ npm run dev
 
 Access the app at `http://localhost:3000`.
 
-## API Endpoints (v1.0.0)
+## API Endpoints (v1.1.0)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -114,6 +114,8 @@ Access the app at `http://localhost:3000`.
 | `/api/v1/indicators/available-types` | GET | Available indicator metadata |
 | `/api/v1/charts/{ticker_symbol}/divergences` | GET | Ticker-level divergence events |
 | `/api/v1/screener/divergences` | GET | Market-level divergence screener |
+| `/api/v1/charts/{ticker_symbol}/triangles` | GET | Ticker-level triangle pattern events |
+| `/api/v1/screener/triangles` | GET | Market-level triangle pattern screener |
 | `/api/v1/sync/start` | POST | Start background sync job |
 | `/api/v1/sync/progress` | GET | Poll sync progress |
 | `/api/v1/sync/stop` | POST | Stop active sync job |
@@ -141,10 +143,11 @@ See [API_CONTRACT.md](./API_CONTRACT.md) for full request/response details.
 - Price chart with MA overlays
 - RSI and MACD panels
 - Divergence overlays and parameterized detection controls
+- Triangle pattern overlays (potential + breakout states)
 
 ### Screener (`/screener`)
-- Divergence screener across market
-- Configurable detection windows
+- Mode switch: divergence screener or triangle screener
+- Configurable detection windows and filters per mode
 
 ## Technical Indicators
 
@@ -196,7 +199,7 @@ ACTIVE_EXCHANGES=IDX
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
 
-## Database Schema (v1.0.0)
+## Database Schema (v1.1.0)
 
 See [DB_DESIGN.md](./DB_DESIGN.md) for the complete schema:
 - `indexes`

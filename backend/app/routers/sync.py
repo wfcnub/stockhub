@@ -150,6 +150,37 @@ def stop_sync(
     }
 
 
+@router.post("/migrate-macd")
+def migrate_macd_data(
+    index_code: Optional[str] = Query(None, description="Optional index code scope (e.g., JCI)"),
+    include_inactive: bool = Query(False, description="Include inactive tickers"),
+    db: Session = Depends(get_db),
+):
+    """
+    Migrate legacy MACD storage and backfill selectable MACD modes.
+
+    - Renames legacy `macd` rows to `macd_ema`
+    - Recalculates and upserts both `macd_ema` and `macd_sma` using existing price data
+    """
+    index = None
+    if index_code:
+        index = db.query(Index).filter(Index.code == index_code.upper()).first()
+        if not index:
+            raise HTTPException(status_code=404, detail=f"Index {index_code} not found")
+
+    sync_service = DataSyncService(db)
+    result = sync_service.migrate_macd_modes(
+        index_id=index.id if index else None,
+        include_inactive=include_inactive,
+    )
+
+    return {
+        "index_code": index.code if index else None,
+        "include_inactive": include_inactive,
+        **result,
+    }
+
+
 def _sync_ticker_worker(args):
     """Worker function for multiprocessing ticker sync"""
     ticker_id, start_date = args

@@ -136,6 +136,7 @@ def get_ticker_chart(
     symbol: str,
     range: str = Query("ALL", description="Preset range: 1M, 3M, 6M, 1Y, 5Y, ALL"),
     ma_periods: str = Query("10,15,20,50,100,200", description="Comma-separated MA periods"),
+    macd_ma_type: str = Query("sma", description="MACD moving-average mode: sma or ema"),
     db: Session = Depends(get_db)
 ):
     """
@@ -148,6 +149,10 @@ def get_ticker_chart(
     ticker = db.query(Ticker).filter(Ticker.symbol == symbol.upper()).first()
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")
+
+    requested_macd_ma_type = (macd_ma_type or "sma").lower()
+    if requested_macd_ma_type not in {"sma", "ema"}:
+        raise HTTPException(status_code=400, detail="Invalid macd_ma_type. Use 'sma' or 'ema'.")
 
     # Map range to days
     range_map = {
@@ -185,38 +190,69 @@ def get_ticker_chart(
 
     # Group indicators by date
     indicators_by_date = {}
+
+    def parse_macd_payload(indicator: TechnicalIndicator, default_ma_type: str):
+        macd_data = {
+            "value": float(indicator.value),
+            "signal": None,
+            "histogram": None,
+            "ma_type": default_ma_type,
+        }
+
+        if indicator.extra_data:
+            try:
+                extra_data = json.loads(indicator.extra_data)
+                if isinstance(extra_data, dict):
+                    if extra_data.get("signal") is not None:
+                        macd_data["signal"] = float(extra_data["signal"])
+                    if extra_data.get("histogram") is not None:
+                        macd_data["histogram"] = float(extra_data["histogram"])
+                    if extra_data.get("ma_type") in {"sma", "ema"}:
+                        macd_data["ma_type"] = str(extra_data["ma_type"])
+            except (TypeError, ValueError):
+                pass
+
+        return macd_data
+
     for ind in indicator_data:
         if ind.date not in indicators_by_date:
             indicators_by_date[ind.date] = {}
+
+        date_indicators = indicators_by_date[ind.date]
+
         if ind.indicator_type == "sma":
-            indicators_by_date[ind.date][f"ma_{ind.window_period}"] = ind.value
+            date_indicators[f"ma_{ind.window_period}"] = ind.value
         elif ind.indicator_type == "rsi":
-            indicators_by_date[ind.date]["rsi_14"] = ind.value
-        elif ind.indicator_type == "macd":
-            # Current storage format: one MACD row with signal/histogram in extra_data JSON.
-            macd_data = {
-                "value": float(ind.value),
-                "signal": None,
-                "histogram": None,
-            }
+            date_indicators["rsi_14"] = ind.value
+        elif ind.indicator_type in {"macd", "macd_sma", "macd_ema"}:
+            resolved_ma_type = "sma" if ind.indicator_type == "macd_sma" else "ema"
+            macd_modes = date_indicators.setdefault("macd_modes", {})
+            payload = parse_macd_payload(ind, resolved_ma_type)
 
-            if ind.extra_data:
-                try:
-                    extra_data = json.loads(ind.extra_data)
-                    if isinstance(extra_data, dict):
-                        if extra_data.get("signal") is not None:
-                            macd_data["signal"] = float(extra_data["signal"])
-                        if extra_data.get("histogram") is not None:
-                            macd_data["histogram"] = float(extra_data["histogram"])
-                except (TypeError, ValueError):
-                    pass
+            # Legacy `macd` rows map to EMA mode and should not override explicit `macd_ema` rows.
+            if ind.indicator_type == "macd":
+                macd_modes.setdefault("ema", payload)
+            else:
+                macd_modes[resolved_ma_type] = payload
 
-            indicators_by_date[ind.date]["macd"] = macd_data
+    for _, values in indicators_by_date.items():
+        macd_modes = values.get("macd_modes")
+        if not isinstance(macd_modes, dict):
+            continue
+
+        selected_macd = (
+            macd_modes.get(requested_macd_ma_type)
+            or macd_modes.get("sma")
+            or macd_modes.get("ema")
+        )
+        if selected_macd:
+            values["macd"] = selected_macd
 
     # Build chart data
     chart_data = {
         "symbol": ticker.symbol,
         "range": range,
+        "macd_ma_type": requested_macd_ma_type,
         "data": []
     }
 

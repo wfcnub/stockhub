@@ -24,6 +24,9 @@ class DataSyncService:
 
     # Moving average windows from config
     MA_PERIODS = settings.MA_WINDOWS
+    MACD_LEGACY_TYPE = "macd"
+    MACD_SMA_TYPE = "macd_sma"
+    MACD_EMA_TYPE = "macd_ema"
 
     def __init__(self, db: Session):
         self.db = db
@@ -254,11 +257,18 @@ class DataSyncService:
                 ticker_id, 'ema', period, results
             )
 
-        # Calculate MACD (standard: 12, 26, 9)
-        macd_indicator = IndicatorRegistry.get('macd')
-        results = macd_indicator.calculate(df)
-        indicators_added += self._save_indicator_results(
-            ticker_id, 'macd', None, results
+        # Calculate MACD in both modes so chart endpoints can switch without recomputing.
+        indicators_added += self._save_macd_for_dataframe(
+            ticker_id=ticker_id,
+            df=df,
+            ma_type="sma",
+            indicator_type=self.MACD_SMA_TYPE,
+        )
+        indicators_added += self._save_macd_for_dataframe(
+            ticker_id=ticker_id,
+            df=df,
+            ma_type="ema",
+            indicator_type=self.MACD_EMA_TYPE,
         )
 
         # Calculate RSI (standard: 14)
@@ -276,6 +286,122 @@ class DataSyncService:
         )
 
         return indicators_added
+
+    def _save_macd_for_dataframe(
+        self,
+        ticker_id: int,
+        df: pd.DataFrame,
+        ma_type: str,
+        indicator_type: str,
+    ) -> int:
+        """Calculate and store MACD values for a DataFrame in one MA mode."""
+        macd_indicator = IndicatorRegistry.get('macd', ma_type=ma_type)
+        results = macd_indicator.calculate(df)
+        return self._save_indicator_results(
+            ticker_id=ticker_id,
+            indicator_type=indicator_type,
+            window_period=None,
+            results=results,
+        )
+
+    def migrate_macd_modes(self, index_id: Optional[int] = None, include_inactive: bool = False) -> Dict[str, Any]:
+        """
+        Migrate legacy MACD rows and backfill mode-specific MACD datasets.
+
+        Steps:
+        1. Rename legacy `macd` rows to `macd_ema`.
+        2. Recalculate and upsert both `macd_ema` and `macd_sma` from price history.
+        """
+        ticker_query = self.db.query(Ticker)
+        if index_id is not None:
+            ticker_query = ticker_query.filter(Ticker.index_id == index_id)
+        if not include_inactive:
+            ticker_query = ticker_query.filter(Ticker.is_active == True)
+
+        tickers = ticker_query.all()
+        ticker_ids = [ticker.id for ticker in tickers]
+
+        if not ticker_ids:
+            return {
+                "tickers_processed": 0,
+                "legacy_rows_migrated": 0,
+                "macd_sma_added": 0,
+                "macd_ema_added": 0,
+                "message": "No tickers matched migration filter",
+            }
+
+        legacy_rows = self.db.query(TechnicalIndicator).filter(
+            TechnicalIndicator.ticker_id.in_(ticker_ids),
+            TechnicalIndicator.indicator_type == self.MACD_LEGACY_TYPE,
+        ).all()
+
+        legacy_rows_migrated = 0
+        duplicate_legacy_rows_removed = 0
+        for row in legacy_rows:
+            existing_ema = self.db.query(TechnicalIndicator).filter(
+                and_(
+                    TechnicalIndicator.ticker_id == row.ticker_id,
+                    TechnicalIndicator.date == row.date,
+                    TechnicalIndicator.indicator_type == self.MACD_EMA_TYPE,
+                    TechnicalIndicator.window_period == row.window_period,
+                )
+            ).first()
+
+            if existing_ema:
+                if not existing_ema.extra_data and row.extra_data:
+                    existing_ema.extra_data = row.extra_data
+                self.db.delete(row)
+                duplicate_legacy_rows_removed += 1
+                continue
+
+            row.indicator_type = self.MACD_EMA_TYPE
+            legacy_rows_migrated += 1
+
+        self.db.commit()
+
+        macd_sma_added = 0
+        macd_ema_added = 0
+        tickers_processed = 0
+
+        for ticker in tickers:
+            prices = self.db.query(DailyPrice).filter(
+                DailyPrice.ticker_id == ticker.id
+            ).order_by(DailyPrice.date.asc()).all()
+
+            if not prices:
+                continue
+
+            df = pd.DataFrame([{
+                'date': p.date,
+                'open': p.open,
+                'high': p.high,
+                'low': p.low,
+                'close': p.close,
+                'volume': p.volume,
+            } for p in prices])
+
+            macd_ema_added += self._save_macd_for_dataframe(
+                ticker_id=ticker.id,
+                df=df,
+                ma_type="ema",
+                indicator_type=self.MACD_EMA_TYPE,
+            )
+            macd_sma_added += self._save_macd_for_dataframe(
+                ticker_id=ticker.id,
+                df=df,
+                ma_type="sma",
+                indicator_type=self.MACD_SMA_TYPE,
+            )
+            tickers_processed += 1
+
+        return {
+            "tickers_processed": tickers_processed,
+            "legacy_rows_migrated": legacy_rows_migrated,
+            "duplicate_legacy_rows_removed": duplicate_legacy_rows_removed,
+            "macd_sma_added": macd_sma_added,
+            "macd_ema_added": macd_ema_added,
+            "message": "MACD mode migration completed",
+        }
 
     def _save_indicator_results(
         self,
