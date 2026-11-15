@@ -14,9 +14,9 @@ out/
 # Next.js cache
 .next/cache/
 
-# Production build
-build/
-dist/
+# Production build (anchored: Python rules below must not hide frontend sources)
+/frontend/build/
+/frontend/dist/
 
 # Testing
 coverage/
@@ -43,25 +43,27 @@ __pycache__
 
 # Virtual environments
 venv/
-env/
-ENV/
 .venv/
 .env/
+/backend/env/
+/backend/ENV/
 
 # Distribution / packaging
+# Anchored to /backend/ on purpose: an unanchored `lib/` here used to hide
+# frontend/src/lib/ (api.ts, chartTheme.ts) from git.
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
+/backend/build/
+/backend/develop-eggs/
+/backend/dist/
+/backend/downloads/
+/backend/eggs/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+/backend/lib/
+/backend/lib64/
+/backend/parts/
+/backend/sdist/
+/backend/var/
+/backend/wheels/
 *.egg-info/
 .installed.cfg
 *.egg
