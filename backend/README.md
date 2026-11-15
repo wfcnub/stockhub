@@ -56,6 +56,9 @@ scripts/local-pg.sh destroy        # delete everything
 - It listens on 127.0.0.1:55432 (`LOCAL_PG_PORT`) and on a socket inside the folder.
   `LOCAL_PG_DIR` moves the folder.
 - Passwords are random and kept only in mode-600 files in the folder.
+- Safety: the script only touches a folder it created. `setup` writes `.stockhub-local-pg`
+  into it and adopts only a missing or empty folder. Every other command refuses a folder
+  without that marker. `/`, `$HOME`, `backend/` and the repo root are always refused.
 - `TEST_DATABASE_URL` wins over `LOCAL_PG=1`. If the server was already running, pytest
   leaves it running.
 - Each test creates and drops its own scratch database, as in CI.

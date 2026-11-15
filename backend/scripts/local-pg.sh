@@ -35,6 +35,8 @@ TEST_PW_FILE="$PG_DIR/stockhub_test.pw"
 BIN_DIR="$ROOT_DIR/usr/lib/postgresql/$PG_MAJOR/bin"
 TEST_ROLE=stockhub_test
 TEST_DB=stockhub_test
+MARKER_FILE="$PG_DIR/.stockhub-local-pg"
+MARKER_TEXT="stockhub backend/scripts/local-pg.sh v1"
 
 export LD_LIBRARY_PATH="$ROOT_DIR/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
@@ -50,6 +52,50 @@ random_password() {
   printf '%s\n' "${raw:0:32}"
 }
 
+# --- folder safety ----------------------------------------------------------------------------
+# Every command works only on a folder this script created (it holds MARKER_FILE). setup may
+# also adopt a missing or empty folder. Obviously wrong targets are refused outright.
+
+resolved_dir() {
+  realpath -m -- "$PG_DIR"
+}
+
+refuse_dangerous_dir() {
+  local dir repo_root
+  dir="$(resolved_dir)"
+  repo_root="$(realpath -m -- "$BACKEND_DIR/..")"
+  case "$dir" in
+    / | "$(realpath -m -- "${HOME:-/}")" | "$BACKEND_DIR" | "$repo_root")
+      die "refusing to use $dir as LOCAL_PG_DIR" ;;
+  esac
+}
+
+has_marker() {
+  [[ -f "$MARKER_FILE" ]] && [[ "$(head -n 1 "$MARKER_FILE")" == "$MARKER_TEXT" ]]
+}
+
+is_empty_dir() {
+  [[ -d "$PG_DIR" ]] && [[ -z "$(ls -A -- "$PG_DIR")" ]]
+}
+
+require_ours() {
+  refuse_dangerous_dir
+  has_marker || die "$PG_DIR is not a local-pg folder (no marker); run: scripts/local-pg.sh setup"
+}
+
+claim_dir() {
+  # For setup: create or adopt the folder, but never take over a foreign non-empty one.
+  refuse_dangerous_dir
+  if has_marker; then
+    return
+  fi
+  if [[ -e "$PG_DIR" ]] && ! is_empty_dir; then
+    die "refusing to set up in $PG_DIR: not empty and not created by this script"
+  fi
+  mkdir -p "$PG_DIR"
+  printf '%s\n' "$MARKER_TEXT" >"$MARKER_FILE"
+}
+
 secure_files() {
   # Explicit modes: a default ACL on the parent directory can override the umask.
   chmod 700 "$PG_DIR"
@@ -60,7 +106,7 @@ secure_files() {
 }
 
 is_running() {
-  [[ -d "$DATA_DIR" ]] && "$BIN_DIR/pg_ctl" -D "$DATA_DIR" status >/dev/null 2>&1
+  [[ -d "$DATA_DIR" && -x "$BIN_DIR/pg_ctl" ]] && "$BIN_DIR/pg_ctl" -D "$DATA_DIR" status >/dev/null 2>&1
 }
 
 superuser_psql() {
@@ -99,6 +145,7 @@ init_cluster() {
 }
 
 start() {
+  require_ours
   [[ -f "$DATA_DIR/PG_VERSION" ]] || die "not set up; run: scripts/local-pg.sh setup"
   if is_running; then
     return
@@ -110,6 +157,7 @@ start() {
 }
 
 stop() {
+  require_ours
   if is_running; then
     "$BIN_DIR/pg_ctl" -D "$DATA_DIR" -m fast -w stop >/dev/null
     log "stopped"
@@ -134,7 +182,7 @@ SQL
 }
 
 setup() {
-  mkdir -p "$PG_DIR"
+  claim_dir
   install_binaries
   init_cluster
   secure_files
@@ -147,25 +195,32 @@ setup() {
 }
 
 url() {
+  require_ours
   [[ -f "$TEST_PW_FILE" ]] || die "not set up; run: scripts/local-pg.sh setup"
   echo "postgresql://$TEST_ROLE:$(cat "$TEST_PW_FILE")@127.0.0.1:$PG_PORT/$TEST_DB"
 }
 
 destroy() {
-  stop || true
-  # Guard: only delete a folder that looks like ours.
-  if [[ -d "$PG_DIR" ]]; then
-    [[ -d "$ROOT_DIR" || -d "$DATA_DIR" || -d "$DEB_DIR" || ! -e "$PG_DIR/"* ]] || die "refusing to delete $PG_DIR (not a local-pg folder)"
-    rm -rf -- "$PG_DIR"
-    log "deleted $PG_DIR"
+  refuse_dangerous_dir
+  if [[ ! -e "$PG_DIR" ]]; then
+    return
   fi
+  if is_empty_dir; then
+    rmdir -- "$PG_DIR"
+    log "deleted empty $PG_DIR"
+    return
+  fi
+  has_marker || die "refusing to delete $PG_DIR: not created by this script (no marker)"
+  stop
+  rm -rf -- "$PG_DIR"
+  log "deleted $PG_DIR"
 }
 
 case "${1:-}" in
   setup) setup ;;
   start) start ;;
   stop) stop ;;
-  status) if is_running; then echo running; else echo stopped; fi ;;
+  status) require_ours; if is_running; then echo running; else echo stopped; fi ;;
   url) url ;;
   destroy) destroy ;;
   *) echo "usage: $0 {setup|start|stop|status|url|destroy}" >&2; exit 2 ;;
