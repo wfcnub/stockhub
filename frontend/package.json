@@ -12,7 +12,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@tanstack/react-query": "^5.28.0",
@@ -36,8 +38,10 @@
     "autoprefixer": "^10.4.27",
     "eslint": "^10.15.0",
     "eslint-config-next": "^16.4.6",
+    "eslint-config-prettier": "^10.1.8",
     "jsdom": "^31.0.1",
     "postcss": "^8.5.8",
+    "prettier": "^3.10.1",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.4.0",
     "vitest": "^5.1.0"
