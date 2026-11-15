@@ -1,0 +1,10 @@
+[Unit]
+Description=StockHub data sync on weekdays after the IDX close
+
+[Timer]
+# IDX closes about 16:00 WIB: start at 17:30 Monday to Friday
+OnCalendar=Mon..Fri 17:30 Asia/Jakarta
+Persistent=true
+
+[Install]
+WantedBy=timers.target

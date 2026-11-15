@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly StockHub database backup at 03:00 WIB
+
+[Timer]
+# 03:00 WIB (UTC+7). If the guest timezone is UTC this is 20:00 UTC the day before
+OnCalendar=*-*-* 03:00:00 Asia/Jakarta
+Persistent=true
+
+[Install]
+WantedBy=timers.target

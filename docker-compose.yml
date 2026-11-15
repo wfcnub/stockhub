@@ -1,54 +1,60 @@
-version: '3.8'
+# StockHub local development stack (source bind-mounted, reload on change).
+# Copy .env.example to .env and set POSTGRES_PASSWORD first: no password lives in this file.
+# For deployment use docker-compose.prod.yml.
+name: stockhub-dev
 
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     container_name: stockhub-db
     environment:
-      POSTGRES_USER: stockhub
-      POSTGRES_PASSWORD: stockhub_dev
-      POSTGRES_DB: stockhub
+      POSTGRES_USER: ${POSTGRES_USER:-stockhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-stockhub}
     ports:
-      - "5432:5432"
+      # Loopback only: not reachable from the LAN
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/18/docker, so mount the parent
+      - postgres18_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stockhub"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      target: dev
     container_name: stockhub-backend
     environment:
-      DATABASE_URL: postgresql://stockhub:stockhub_dev@db:5432/stockhub
-      CORS_ORIGINS: http://localhost:3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stockhub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-stockhub}
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      target: dev
     container_name: stockhub-frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Dev talks to the API directly; deployment uses the relative /api/v1 through Next
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - /app/.next
     depends_on:
       - backend
 
 volumes:
-  postgres_data:
+  postgres18_data:

@@ -94,6 +94,27 @@ print_success "All prerequisites met!"
 # ============================================
 print_info "Setting up environment files..."
 
+# Root .env (gitignored): the dev database password lives here, never in the repo
+ROOT_ENV="$SCRIPT_DIR/.env"
+if [ ! -f "$ROOT_ENV" ]; then
+    print_info "Creating .env with a random database password..."
+    if command_exists openssl; then
+        GEN_PASSWORD="$(openssl rand -hex 24)"
+    else
+        GEN_PASSWORD="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    fi
+    sed "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${GEN_PASSWORD}|" "$SCRIPT_DIR/.env.example" > "$ROOT_ENV"
+    chmod 600 "$ROOT_ENV"
+    print_success "Created .env"
+fi
+set -a
+# shellcheck disable=SC1090
+. "$ROOT_ENV"
+set +a
+POSTGRES_USER="${POSTGRES_USER:-stockhub}"
+POSTGRES_DB="${POSTGRES_DB:-stockhub}"
+DB_PORT="${DB_PORT:-5432}"
+
 # Backend .env
 BACKEND_ENV="$SCRIPT_DIR/backend/.env"
 if [ ! -f "$BACKEND_ENV" ]; then
@@ -103,11 +124,11 @@ if [ ! -f "$BACKEND_ENV" ]; then
 # Use SQLite for local development (no Docker needed)
 DATABASE_URL=sqlite:///./stockhub.db
 
-# Or use PostgreSQL (requires Docker):
-# DATABASE_URL=postgresql://stockhub:stockhub_dev@localhost:5432/stockhub
+# Or use PostgreSQL (requires Docker; start.sh fills in the password from the root .env):
+# DATABASE_URL=postgresql://stockhub:<POSTGRES_PASSWORD>@localhost:5432/stockhub
 
-# CORS Origins (comma-separated)
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+# CORS Origins (JSON list)
+CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3001","http://127.0.0.1:3001"]
 
 # Active exchanges (comma-separated)
 ACTIVE_EXCHANGES=IDX
@@ -142,7 +163,6 @@ fi
 # Start Database (if using Docker)
 # ============================================
 DB_HOST="localhost"
-DB_PORT="5432"
 
 if [ "$USE_DOCKER" = true ]; then
     print_info "Starting PostgreSQL database with Docker..."
@@ -160,12 +180,12 @@ if [ "$USE_DOCKER" = true ]; then
         print_info "Creating and starting database container..."
         if docker run -d \
             --name stockhub-db \
-            -e POSTGRES_USER=stockhub \
-            -e POSTGRES_PASSWORD=stockhub_dev \
-            -e POSTGRES_DB=stockhub \
-            -p 5432:5432 \
-            -v stockhub_postgres_data:/var/lib/postgresql/data \
-            postgres:15-alpine >/dev/null 2>&1; then
+            -e POSTGRES_USER="$POSTGRES_USER" \
+            -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            -e POSTGRES_DB="$POSTGRES_DB" \
+            -p "127.0.0.1:${DB_PORT}:5432" \
+            -v stockhub_pg18_data:/var/lib/postgresql \
+            postgres:18-alpine >/dev/null 2>&1; then
             print_success "Database container created and started"
         else
             print_warning "Failed to create database container. Falling back to SQLite."
@@ -192,8 +212,9 @@ if [ "$USE_DOCKER" = true ]; then
                 # Create a backup
                 cp "$BACKEND_ENV" "$BACKEND_ENV.bak"
                 # Update DATABASE_URL
-                sed -i.bak 's|DATABASE_URL=sqlite:///\.\/stockhub\.db|DATABASE_URL=postgresql://stockhub:stockhub_dev@localhost:5432/stockhub|' "$BACKEND_ENV" 2>/dev/null || \
-                sed -i '' 's|DATABASE_URL=sqlite:///\.\/stockhub\.db|DATABASE_URL=postgresql://stockhub:stockhub_dev@localhost:5432/stockhub|' "$BACKEND_ENV"
+                PG_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${DB_PORT}/${POSTGRES_DB}"
+                sed -i.bak "s|DATABASE_URL=sqlite:///\.\/stockhub\.db|DATABASE_URL=${PG_URL}|" "$BACKEND_ENV" 2>/dev/null || \
+                sed -i '' "s|DATABASE_URL=sqlite:///\.\/stockhub\.db|DATABASE_URL=${PG_URL}|" "$BACKEND_ENV"
                 rm -f "$BACKEND_ENV.bak"
                 print_success "Updated backend/.env to use PostgreSQL"
             fi
@@ -222,22 +243,26 @@ print_info "Setting up backend..."
 
 cd "$SCRIPT_DIR/backend"
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    print_info "Creating Python virtual environment..."
-    python3 -m venv venv
-    print_success "Virtual environment created"
+# Prefer uv (uv.lock) and fall back to venv + requirements.txt
+USE_UV=false
+if command_exists uv && [ -f uv.lock ]; then
+    USE_UV=true
+    print_info "Installing Python dependencies with uv..."
+    uv sync --frozen
+    print_success "Python dependencies installed (uv)"
+else
+    if [ ! -d "venv" ]; then
+        print_info "Creating Python virtual environment..."
+        python3 -m venv venv
+        print_success "Virtual environment created"
+    fi
+    print_info "Activating virtual environment..."
+    source venv/bin/activate
+    print_info "Installing Python dependencies..."
+    pip install -q --upgrade pip
+    pip install -q -r requirements.txt
+    print_success "Python dependencies installed"
 fi
-
-# Activate virtual environment
-print_info "Activating virtual environment..."
-source venv/bin/activate
-
-# Install dependencies
-print_info "Installing Python dependencies..."
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
-print_success "Python dependencies installed"
 
 # ============================================
 # Setup Frontend
@@ -263,8 +288,12 @@ trap 'kill $(jobs -p) 2>/dev/null; exit' INT TERM EXIT
 # Start backend
 print_info "Starting backend server..."
 cd "$SCRIPT_DIR/backend"
-source venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 &
+if [ "$USE_UV" = true ]; then
+    uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 &
+else
+    source venv/bin/activate
+    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 &
+fi
 BACKEND_PID=$!
 print_success "Backend started on http://localhost:8000"
 
@@ -290,7 +319,7 @@ echo -e "  ${BLUE}Frontend:${NC}     http://localhost:3000"
 echo -e "  ${BLUE}Backend API:${NC}  http://localhost:8000"
 echo -e "  ${BLUE}API Docs:${NC}     http://localhost:8000/docs"
 if [ "$USE_DOCKER" = true ]; then
-    echo -e "  ${BLUE}Database:${NC}    PostgreSQL on localhost:5432"
+    echo -e "  ${BLUE}Database:${NC}    PostgreSQL on localhost:${DB_PORT}"
 else
     echo -e "  ${BLUE}Database:${NC}    SQLite (./backend/stockhub.db)"
 fi

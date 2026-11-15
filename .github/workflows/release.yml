@@ -1,0 +1,90 @@
+name: Release images
+
+# master pushes publish sha-<short> and edge tags (not deployed). A v1.2.3 tag publishes 1.2.3, 1.2
+# and latest; the deploy timer on the homelab guest picks up the newest v* tag.
+on:
+  push:
+    branches: [master]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Build, scan and push (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [backend, frontend]
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/stockhub-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect
+        id: detect
+        run: |
+          if [ "${{ matrix.name }}" = "backend" ] && [ ! -f backend/uv.lock ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::backend/uv.lock not found: backend image not published"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.detect.outputs.build == 'true'
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: steps.detect.outputs.build == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags and labels
+        id: meta
+        if: steps.detect.outputs.build == 'true'
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=raw,value=edge,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build locally for the scan
+        if: steps.detect.outputs.build == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.name }}
+          load: true
+          push: false
+          tags: scan/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Trivy image scan (HIGH and CRITICAL with a fix fail the release)
+        if: steps.detect.outputs.build == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: scan/${{ matrix.name }}:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Push
+        if: steps.detect.outputs.build == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.name }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          provenance: mode=max
+          sbom: true

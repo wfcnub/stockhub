@@ -1,0 +1,93 @@
+# StockHub deployment stack. Images come from GHCR; nothing is built or bind-mounted from source.
+# Run from /opt/stockhub with the real .env (mode 600, never in git; see deploy/.env.example):
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+# Only the frontend publishes a port. The database and backend are reachable on the compose
+# network only. The Cloudflare tunnel (Access in front) points at http://<this guest>:3000.
+name: stockhub
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *logging
+
+services:
+  db:
+    <<: *hardening
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in /opt/stockhub/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-stockhub}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    # The official entrypoint starts as root, fixes ownership, then drops to postgres
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "max_connections=50"]
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks: [internal]
+
+  backend:
+    <<: *hardening
+    image: ghcr.io/wfcnub/stockhub-backend:${STOCKHUB_TAG:?set STOCKHUB_TAG (deploy.sh does this)}
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stockhub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-stockhub}
+      # Same-origin through the frontend proxy, so no cross-origin callers are expected
+      CORS_ORIGINS: '[]'
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks: [internal]
+
+  frontend:
+    <<: *hardening
+    image: ghcr.io/wfcnub/stockhub-frontend:${STOCKHUB_TAG:?set STOCKHUB_TAG (deploy.sh does this)}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks: [internal]
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
