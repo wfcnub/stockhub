@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from app.config import Settings
 
@@ -32,7 +33,7 @@ def test_env_file_written_by_start_sh_loads(
         monkeypatch.delenv(key, raising=False)
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "DATABASE_URL=sqlite:///./stockhub.db\n"
+        "DATABASE_URL=postgresql://stockhub:pw@localhost:5432/stockhub\n"
         "CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000\n"
         "ACTIVE_EXCHANGES=IDX\n"
         "SOME_UNKNOWN_KEY=1\n"
@@ -53,7 +54,6 @@ def test_ma_windows_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:
         ("postgresql://u:p@db:5432/stockhub", "postgresql+psycopg://u:p@db:5432/stockhub"),
         ("postgres://u:p@db:5432/stockhub", "postgresql+psycopg://u:p@db:5432/stockhub"),
         ("postgresql+psycopg://u:p@db/stockhub", "postgresql+psycopg://u:p@db/stockhub"),
-        ("sqlite:///./stockhub.db", "sqlite:///./stockhub.db"),
     ],
 )
 def test_database_url_driver_is_explicit(
@@ -61,3 +61,16 @@ def test_database_url_driver_is_explicit(
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", given)
     assert Settings(_env_file=None).DATABASE_URL == expected
+
+
+@pytest.mark.parametrize("url", ["sqlite:///./stockhub.db", "mysql://u:p@db/x", ""])
+def test_non_postgres_database_url_is_rejected(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", url)
+    with pytest.raises(ValidationError, match="PostgreSQL"):
+        Settings(_env_file=None)
+
+
+def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(ValidationError, match="DATABASE_URL"):
+        Settings(_env_file=None)
