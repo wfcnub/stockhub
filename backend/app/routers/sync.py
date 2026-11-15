@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from sqlalchemy.orm import Session
-from app.db.database import get_db
-from app.services.data_sync import DataSyncService
-from app.models import Index, Ticker, SyncJob
-from typing import Optional
-from datetime import datetime
 import multiprocessing
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.models import Index, SyncJob, Ticker
+from app.services.data_sync import DataSyncService
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 

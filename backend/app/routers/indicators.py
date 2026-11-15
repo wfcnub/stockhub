@@ -1,6 +1,7 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
 
 from app.db.database import get_db
 from app.models.indicator import TechnicalIndicator

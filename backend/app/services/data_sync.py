@@ -3,21 +3,22 @@ Data synchronization service for downloading and updating stock data
 """
 
 import json
-from datetime import datetime, date, timedelta
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from app.models.ticker import Ticker
-from app.models.price import DailyPrice, SyncStatus
-from app.models.indicator import TechnicalIndicator
-from app.models.index import Index
-from app.tools.ticker_list_fetchers import get_ticker_list_fetcher
-from app.config import settings
-from indicators.registry import IndicatorRegistry
-from indicators.base import IndicatorResult
-from app.tools.yfinance import download_stock_data
 import pandas as pd
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models.index import Index
+from app.models.indicator import TechnicalIndicator
+from app.models.price import DailyPrice, SyncStatus
+from app.models.ticker import Ticker
+from app.tools.ticker_list_fetchers import get_ticker_list_fetcher
+from app.tools.yfinance import download_stock_data
+from indicators.base import IndicatorResult
+from indicators.registry import IndicatorRegistry
 
 
 class DataSyncService:

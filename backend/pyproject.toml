@@ -40,6 +40,8 @@ extend-exclude = [".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
+# E712: `Column == True` builds SQL in SQLAlchemy filters; `is True` / truthiness would break the query.
+ignore = ["E712"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "indicators"]

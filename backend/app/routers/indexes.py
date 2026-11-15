@@ -2,10 +2,11 @@
 Index management router - CRUD operations for market indexes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models import Index, Ticker
@@ -216,7 +217,10 @@ def delete_index(
             "hard_delete": True,
             "id": index_id,
             "code": index.code,
-            "message": f"Index '{index.code}' permanently deleted along with {ticker_count} associated tickers",
+            "message": (
+                f"Index '{index.code}' permanently deleted along with "
+                f"{ticker_count} associated tickers"
+            ),
         }
     else:
         # Soft delete
@@ -228,5 +232,8 @@ def delete_index(
             "id": index_id,
             "code": index.code,
             "is_active": False,
-            "message": f"Index '{index.code}' deactivated (soft delete). Use hard_delete=true to permanently remove.",
+            "message": (
+                f"Index '{index.code}' deactivated (soft delete). "
+                "Use hard_delete=true to permanently remove."
+            ),
         }

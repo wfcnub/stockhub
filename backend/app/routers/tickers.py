@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
-from typing import Optional
 import json
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models import Ticker, DailyPrice, KeyMetric, Index, TechnicalIndicator
+from app.models import DailyPrice, Index, KeyMetric, TechnicalIndicator, Ticker
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
 
@@ -178,7 +179,8 @@ def get_ticker_chart(
         raise HTTPException(status_code=404, detail="No price data available for this ticker")
 
     # Parse MA periods
-    ma_periods_list = [int(p.strip()) for p in ma_periods.split(",") if p.strip().isdigit()]
+    # TODO: ma_periods is parsed but not applied (API_CONTRACT says it filters MAs); fix separately.
+    ma_periods_list = [int(p.strip()) for p in ma_periods.split(",") if p.strip().isdigit()]  # noqa: F841
 
     # Get all indicators for the date range
     indicator_data = (

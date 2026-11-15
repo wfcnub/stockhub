@@ -454,8 +454,8 @@ class DivergenceDetectorService:
         p1_near_swing_low_cache: Dict[int, bool] = {}
         strict_pairs = set()
 
-        EMERGING_ALLOWED_VIOLATIONS = 3
-        EMERGING_LOO_TOLERANCE = 0.40  # More lenient for emerging
+        EMERGING_ALLOWED_VIOLATIONS = 3  # noqa: N806
+        EMERGING_LOO_TOLERANCE = 0.40  # noqa: N806 - more lenient for emerging
 
         # Build a set of (p1, p2) pairs that already qualified as strict to avoid duplicates
         for p2_index, right_count in recent_pivots:

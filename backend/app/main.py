@@ -8,7 +8,7 @@ from sqlalchemy import text
 from app import __version__
 from app.config import settings
 from app.db.database import engine
-from app.routers import tickers, prices, indicators, sync, stats, indexes, divergences, triangles
+from app.routers import divergences, indexes, indicators, prices, stats, sync, tickers, triangles
 
 logger = logging.getLogger(__name__)
 

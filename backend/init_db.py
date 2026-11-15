@@ -4,8 +4,17 @@ Run this to create all tables if they don't exist and perform migrations
 """
 
 from sqlalchemy import inspect, text
-from app.db.database import engine, Base, SessionLocal
-from app.models import Index, Ticker, DailyPrice, SyncStatus, KeyMetric, SyncJob, TechnicalIndicator
+
+from app.db.database import Base, SessionLocal, engine
+from app.models import (  # noqa: F401  (importing registers every model on Base.metadata)
+    DailyPrice,
+    Index,
+    KeyMetric,
+    SyncJob,
+    SyncStatus,
+    TechnicalIndicator,
+    Ticker,
+)
 
 
 def init_db():
@@ -71,7 +80,7 @@ def run_migrations():
                     {"index_id": existing_jci.id}
                 )
                 db.delete(existing_idx)
-                print(f"✓ Migration complete: IDX deleted, tickers moved to JCI")
+                print("✓ Migration complete: IDX deleted, tickers moved to JCI")
             else:
                 # Just rename IDX to JCI
                 existing_idx.code = "JCI"

@@ -2,13 +2,13 @@
 Tools module for external data sources and utilities
 """
 
-from app.tools.yfinance import download_stock_data
 from app.tools.ticker_list_fetchers import (
+    JciTickerListFetcher,
     TickerListFetcher,
     get_ticker_list_fetcher,
     register_fetcher,
-    JciTickerListFetcher,
 )
+from app.tools.yfinance import download_stock_data
 
 __all__ = [
     "download_stock_data",

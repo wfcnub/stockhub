@@ -2,10 +2,10 @@
 Yahoo Finance tools for downloading stock data
 """
 
-import numpy as np
+from datetime import datetime
+
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
 from curl_cffi import requests
 
 
@@ -58,7 +58,7 @@ def download_stock_data(
 
     try:
         data["Date"] = data["Date"].dt.date
-    except:
+    except Exception:
         pass
 
     return data

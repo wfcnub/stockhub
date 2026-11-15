@@ -1,7 +1,7 @@
 from typing import Dict, Type
+
 from .base import TickerListFetcher
 from .jci import JciTickerListFetcher
-
 
 FETCHER_REGISTRY: Dict[str, Type[TickerListFetcher]] = {
     "JCI": JciTickerListFetcher,

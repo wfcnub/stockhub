@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models import Ticker
-from app.services.divergence_detector import DivergenceDetectorService, DivergenceConfig
+from app.services.divergence_detector import DivergenceConfig, DivergenceDetectorService
 
 router = APIRouter(tags=["divergences"])
 

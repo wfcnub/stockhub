@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DateTime, Index
+from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -28,4 +28,7 @@ class TechnicalIndicator(Base):
     __table_args__ = (Index("ix_ticker_indicator_date", "ticker_id", "indicator_type", "date"),)
 
     def __repr__(self):
-        return f"<TechnicalIndicator(ticker_id={self.ticker_id}, type={self.indicator_type}, date={self.date}, value={self.value})>"
+        return (
+            f"<TechnicalIndicator(ticker_id={self.ticker_id}, type={self.indicator_type}, "
+            f"date={self.date}, value={self.value})>"
+        )
