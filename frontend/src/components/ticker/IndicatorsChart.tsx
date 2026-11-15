@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
 import type { ChartDataPoint, MACDMovingAverageType } from '@/types';
 import { getChartThemeColors } from '@/lib/chartTheme';

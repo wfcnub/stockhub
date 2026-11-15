@@ -13,7 +13,6 @@ import type {
   TriangleConfigParams,
   MACDMovingAverageType,
 } from '@/types';
-import { TIME_RANGES } from '@/types';
 import { getTicker, getChartData, getTickerDivergences, getTickerTriangles } from '@/lib/api';
 import { KeyMetrics, TickerChart, MACDChart } from '@/components/ticker';
 import { ControlShell } from '@/components/layout/ControlShell';
