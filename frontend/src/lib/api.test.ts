@@ -169,12 +169,26 @@ describe('request params', () => {
     http.get.mockResolvedValue({ data: {} });
 
     await getTicker('A/B');
-    expect(http.get).toHaveBeenLastCalledWith('/tickers/A%2FB');
+    expect(http.get).toHaveBeenLastCalledWith('/tickers/A%2FB', undefined);
 
     await getChartData('BBCA', { range: '1Y', ma_periods: '10,20' });
     expect(http.get).toHaveBeenLastCalledWith('/tickers/BBCA/chart', {
       params: { range: '1Y', ma_periods: '10,20' },
     });
+  });
+
+  it('passes an AbortSignal to the HTTP client so queries can be cancelled', async () => {
+    http.get.mockResolvedValue({ data: { total: 0, data: [] } });
+    const { signal } = new AbortController();
+
+    await getIndexes(true, { signal });
+    expect(http.get).toHaveBeenLastCalledWith('/indexes', { params: { is_active: true }, signal });
+
+    await getDivergenceScreener(7, {}, { signal });
+    expect(http.get).toHaveBeenLastCalledWith('/screener/divergences', { params: { days: 7 }, signal });
+
+    await getTickerTriangles('BBCA', { state: 'all' }, { signal });
+    expect(http.get.mock.calls.at(-1)?.[1].signal).toBe(signal);
   });
 
   it('passes the screener lookback days through, defaulting to 7', async () => {

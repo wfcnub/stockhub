@@ -3,12 +3,14 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ControlShell } from '@/components/layout/ControlShell';
-import { getDivergenceScreener, getTriangleScreener } from '@/lib/api';
+import { divergenceScreenerQuery, triangleScreenerQuery } from '@/lib/queries';
 import type { DivergenceConfigParams } from '@/lib/api';
 import type {
   BreakoutDirection,
   DivergenceScreenerItem,
+  DivergenceScreenerResponse,
   TriangleConfigParams,
   TriangleScreenerItem,
   TriangleState,
@@ -278,6 +280,76 @@ function formatBreakoutDirection(value: BreakoutDirection | null): string {
   return value === 'bullish' ? 'Bullish' : 'Bearish';
 }
 
+// Stable empty references so memoised values do not change identity on every render.
+const EMPTY_DIVERGENCE_RESULTS: DivergenceScreenerItem[] = [];
+const EMPTY_TRIANGLE_RESULTS: TriangleScreenerItem[] = [];
+
+function normalizeDivergenceResults(response: DivergenceScreenerResponse): DivergenceScreenerItem[] {
+  return response.results.map((item) => {
+    const itemWithAliases = item as DivergenceScreenerItem & DivergenceItemAliases;
+    const signalType = normalizeSignalType(
+      firstDefined(
+        itemWithAliases.type,
+        itemWithAliases.divergence_type,
+        itemWithAliases.logic_type,
+        itemWithAliases.signal_type,
+      ),
+    );
+    const grade = normalizeGrade(
+      firstDefined(itemWithAliases.grade, itemWithAliases.grade_type, itemWithAliases.signal_grade),
+    );
+    const strategyType = normalizeStrategyType(
+      firstDefined(
+        itemWithAliases.strategy_type,
+        itemWithAliases.strategy,
+        itemWithAliases.strategy_name,
+        itemWithAliases.strategyType,
+      ),
+    );
+
+    const signalTimestamp =
+      typeof (item as { signal_timestamp?: unknown }).signal_timestamp === 'number'
+        ? Number((item as { signal_timestamp: number }).signal_timestamp)
+        : typeof item.confirmation_timestamp === 'number'
+          ? Number(item.confirmation_timestamp)
+          : Number(item.p2.timestamp);
+
+    const invalidationLevel =
+      typeof (item as { invalidation_level?: unknown }).invalidation_level === 'number'
+        ? Number((item as { invalidation_level: number }).invalidation_level)
+        : null;
+
+    const isInvalidated =
+      typeof (item as { is_invalidated?: unknown }).is_invalidated === 'boolean'
+        ? Boolean((item as { is_invalidated: boolean }).is_invalidated)
+        : false;
+
+    const inferredStrategyType =
+      strategyType ?? (invalidationLevel !== null ? 'BULLISH_AGGRESSIVE' : 'BULLISH_CONFIRMED');
+
+    const inferredGrade =
+      grade ?? (inferredStrategyType === 'BULLISH_AGGRESSIVE' && item.p2.rsi_14 <= 30 ? 'oversold' : 'neutral');
+
+    const actionHint =
+      typeof (item as { action?: unknown }).action === 'string'
+        ? String((item as { action: string }).action)
+        : inferredStrategyType === 'BULLISH_AGGRESSIVE'
+          ? 'Potential Bottom - Monitor for Open Entry.'
+          : 'Confirmed divergence setup';
+
+    return {
+      ...item,
+      type: signalType ?? 'regular',
+      strategy_type: inferredStrategyType,
+      grade: inferredGrade,
+      signal_timestamp: signalTimestamp,
+      invalidation_level: invalidationLevel,
+      is_invalidated: isInvalidated,
+      action: actionHint,
+    };
+  });
+}
+
 function ScreenerContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -334,13 +406,6 @@ function ScreenerContent() {
   const initialTriangleIndexCode = normalizeIndexCode(searchParams.get('tri_index') || '');
 
   const [mode, setMode] = useState<ScreenerMode>(initialMode);
-
-  const [divergenceResults, setDivergenceResults] = useState<DivergenceScreenerItem[]>([]);
-  const [triangleResults, setTriangleResults] = useState<TriangleScreenerItem[]>([]);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>('all');
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('all');
@@ -421,186 +486,57 @@ function ScreenerContent() {
     ],
   );
 
-  const loadDivergenceSignals = useCallback(
-    async (refresh = false) => {
-      if (refresh) {
-        setIsRefreshing(true);
-      } else {
-        setIsLoading(true);
-      }
-      setError(null);
+  // Screener calls are slow, so results are cached per parameter set (see lib/queries.ts); changing a
+  // parameter fetches (or reuses) the matching result, and a request that is no longer needed is cancelled.
+  const divergenceParams: DivergenceConfigParams = {
+    pivot_left_window: pivotLeftWindow,
+    confirmed_right_min: confirmedRightMin,
+    confirmed_right_max: confirmedRightMax,
+    aggressive_right_min: aggressiveRightMin,
+    aggressive_right_max: aggressiveRightMax,
+    include_invalidated: includeInvalidated,
+  };
+  const divergenceQuery = useQuery({
+    ...divergenceScreenerQuery(lookbackDays, divergenceParams),
+    enabled: mode === 'divergence',
+    select: normalizeDivergenceResults,
+  });
 
-      try {
-        const params: DivergenceConfigParams = {
-          pivot_left_window: pivotLeftWindow,
-          confirmed_right_min: confirmedRightMin,
-          confirmed_right_max: confirmedRightMax,
-          aggressive_right_min: aggressiveRightMin,
-          aggressive_right_max: aggressiveRightMax,
-          include_invalidated: includeInvalidated,
-        };
-        const response = await getDivergenceScreener(lookbackDays, params);
-        const normalizedResults = response.results.map((item) => {
-          const itemWithAliases = item as DivergenceScreenerItem & DivergenceItemAliases;
-          const signalType = normalizeSignalType(
-            firstDefined(
-              itemWithAliases.type,
-              itemWithAliases.divergence_type,
-              itemWithAliases.logic_type,
-              itemWithAliases.signal_type,
-            ),
-          );
-          const grade = normalizeGrade(
-            firstDefined(itemWithAliases.grade, itemWithAliases.grade_type, itemWithAliases.signal_grade),
-          );
-          const strategyType = normalizeStrategyType(
-            firstDefined(
-              itemWithAliases.strategy_type,
-              itemWithAliases.strategy,
-              itemWithAliases.strategy_name,
-              itemWithAliases.strategyType,
-            ),
-          );
+  const triangleParams: TriangleConfigParams = {
+    lookback_bars: triangleLookbackBars,
+    pivot_left_window: trianglePivotLeftWindow,
+    pivot_right_window: trianglePivotRightWindow,
+    breakout_relaxed: triangleBreakoutRelaxed,
+    triangle_types: triangleTypeFilter === 'all' ? undefined : [triangleTypeFilter],
+    direction: triangleDirectionFilter,
+    min_confidence: triangleMinConfidence,
+    state: effectiveTriangleState === null || effectiveTriangleState === 'all' ? undefined : effectiveTriangleState,
+    index_code: normalizeIndexCode(triangleIndexCode) || undefined,
+    limit: 500,
+  };
+  // Neither "potential" nor "breakout" selected: nothing to ask the server for.
+  const triangleQuery = useQuery({
+    ...triangleScreenerQuery(lookbackDays, triangleParams),
+    enabled: mode === 'triangle' && effectiveTriangleState !== null,
+  });
 
-          const signalTimestamp =
-            typeof (item as { signal_timestamp?: unknown }).signal_timestamp === 'number'
-              ? Number((item as { signal_timestamp: number }).signal_timestamp)
-              : typeof item.confirmation_timestamp === 'number'
-                ? Number(item.confirmation_timestamp)
-                : Number(item.p2.timestamp);
+  const divergenceResults = divergenceQuery.data ?? EMPTY_DIVERGENCE_RESULTS;
+  const triangleResults = triangleQuery.data?.results ?? EMPTY_TRIANGLE_RESULTS;
 
-          const invalidationLevel =
-            typeof (item as { invalidation_level?: unknown }).invalidation_level === 'number'
-              ? Number((item as { invalidation_level: number }).invalidation_level)
-              : null;
+  const activeQuery = mode === 'divergence' ? divergenceQuery : triangleQuery;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // "Apply" refetches without swapping the table for the loading state; parameter changes show it.
+  const isLoading = activeQuery.isFetching && !isRefreshing;
+  const error = activeQuery.error ? activeQuery.error.message : null;
 
-          const isInvalidated =
-            typeof (item as { is_invalidated?: unknown }).is_invalidated === 'boolean'
-              ? Boolean((item as { is_invalidated: boolean }).is_invalidated)
-              : false;
-
-          const inferredStrategyType =
-            strategyType ?? (invalidationLevel !== null ? 'BULLISH_AGGRESSIVE' : 'BULLISH_CONFIRMED');
-
-          const inferredGrade =
-            grade ?? (inferredStrategyType === 'BULLISH_AGGRESSIVE' && item.p2.rsi_14 <= 30 ? 'oversold' : 'neutral');
-
-          const actionHint =
-            typeof (item as { action?: unknown }).action === 'string'
-              ? String((item as { action: string }).action)
-              : inferredStrategyType === 'BULLISH_AGGRESSIVE'
-                ? 'Potential Bottom - Monitor for Open Entry.'
-                : 'Confirmed divergence setup';
-
-          return {
-            ...item,
-            type: signalType ?? 'regular',
-            strategy_type: inferredStrategyType,
-            grade: inferredGrade,
-            signal_timestamp: signalTimestamp,
-            invalidation_level: invalidationLevel,
-            is_invalidated: isInvalidated,
-            action: actionHint,
-          };
-        });
-
-        setDivergenceResults(normalizedResults);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load divergence screener');
-        setDivergenceResults([]);
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [
-      lookbackDays,
-      pivotLeftWindow,
-      confirmedRightMin,
-      confirmedRightMax,
-      aggressiveRightMin,
-      aggressiveRightMax,
-      includeInvalidated,
-    ],
-  );
-
-  const loadTriangleSignals = useCallback(
-    async (refresh = false) => {
-      if (refresh) {
-        setIsRefreshing(true);
-      } else {
-        setIsLoading(true);
-      }
-      setError(null);
-
-      const resolvedState = resolveTriangleState(
-        triangleIncludePotential,
-        triangleIncludeBreakouts,
-        triangleStateFilter,
-      );
-
-      if (resolvedState === null) {
-        setTriangleResults([]);
-        setIsLoading(false);
-        setIsRefreshing(false);
-        return;
-      }
-
-      try {
-        const params: TriangleConfigParams = {
-          lookback_bars: triangleLookbackBars,
-          pivot_left_window: trianglePivotLeftWindow,
-          pivot_right_window: trianglePivotRightWindow,
-          breakout_relaxed: triangleBreakoutRelaxed,
-          triangle_types: triangleTypeFilter === 'all' ? undefined : [triangleTypeFilter],
-          direction: triangleDirectionFilter,
-          min_confidence: triangleMinConfidence,
-          state: resolvedState === 'all' ? undefined : resolvedState,
-          index_code: normalizeIndexCode(triangleIndexCode) || undefined,
-          limit: 500,
-        };
-
-        const response = await getTriangleScreener(lookbackDays, params);
-        setTriangleResults(response.results);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load triangle screener');
-        setTriangleResults([]);
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [
-      lookbackDays,
-      triangleIncludePotential,
-      triangleIncludeBreakouts,
-      triangleStateFilter,
-      triangleLookbackBars,
-      trianglePivotLeftWindow,
-      trianglePivotRightWindow,
-      triangleBreakoutRelaxed,
-      triangleTypeFilter,
-      triangleDirectionFilter,
-      triangleMinConfidence,
-      triangleIndexCode,
-    ],
-  );
-
-  useEffect(() => {
-    if (mode !== 'divergence') {
-      return;
+  const handleApply = async () => {
+    setIsRefreshing(true);
+    try {
+      await activeQuery.refetch();
+    } finally {
+      setIsRefreshing(false);
     }
-
-    void loadDivergenceSignals();
-  }, [mode, loadDivergenceSignals]);
-
-  useEffect(() => {
-    if (mode !== 'triangle') {
-      return;
-    }
-
-    void loadTriangleSignals();
-  }, [mode, loadTriangleSignals]);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -731,14 +667,14 @@ function ScreenerContent() {
 
   const activeFilteredCount = mode === 'divergence' ? filteredDivergenceResults.length : filteredTriangleResults.length;
 
-  useEffect(() => {
-    if (isLoading) {
-      return;
-    }
-
+  // Keep the page inside the filtered result count. Adjusting state while rendering is React's
+  // recommended alternative to an effect for derived state.
+  if (!isLoading) {
     const maxPage = Math.max(0, Math.ceil(activeFilteredCount / itemsPerPage) - 1);
-    setPage((currentPage) => (currentPage > maxPage ? maxPage : currentPage));
-  }, [activeFilteredCount, itemsPerPage, isLoading]);
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }
 
   const paginatedDivergenceResults = useMemo(() => {
     const start = page * itemsPerPage;
@@ -791,7 +727,6 @@ function ScreenerContent() {
 
     setMode(nextMode);
     setPage(0);
-    setError(null);
   };
 
   const regularCount = divergenceResults.filter((item) => item.type === 'regular').length;
@@ -1026,11 +961,7 @@ function ScreenerContent() {
                 Reset Defaults
               </button>
 
-              <button
-                onClick={() => loadDivergenceSignals(true)}
-                className="gemini-button-primary px-4 py-2 text-sm"
-                disabled={isRefreshing}
-              >
+              <button onClick={handleApply} className="gemini-button-primary px-4 py-2 text-sm" disabled={isRefreshing}>
                 {isRefreshing ? 'Applying...' : 'Apply'}
               </button>
             </div>
@@ -1122,11 +1053,7 @@ function ScreenerContent() {
                 Reset Defaults
               </button>
 
-              <button
-                onClick={() => loadTriangleSignals(true)}
-                className="gemini-button-primary px-4 py-2 text-sm"
-                disabled={isRefreshing}
-              >
+              <button onClick={handleApply} className="gemini-button-primary px-4 py-2 text-sm" disabled={isRefreshing}>
                 {isRefreshing ? 'Applying...' : 'Apply'}
               </button>
             </div>

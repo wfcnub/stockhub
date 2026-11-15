@@ -162,24 +162,37 @@ async function request<T>(promise: Promise<{ data: T }>): Promise<T> {
   }
 }
 
+/** Read calls accept an AbortSignal so TanStack Query can cancel requests that are no longer needed. */
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+function withSignal<C extends object>(
+  config: C | undefined,
+  options: RequestOptions,
+): (C & RequestOptions) | undefined {
+  return options.signal ? ({ ...config, signal: options.signal } as C & RequestOptions) : config;
+}
+
 function csv(values: readonly string[] | undefined): string | undefined {
   return values && values.length > 0 ? values.join(',') : undefined;
 }
 
 // ============ Stats ============
 
-export function getStats(): Promise<Stats> {
-  return request(client.get<Stats>('/stats'));
+export function getStats(options: RequestOptions = {}): Promise<Stats> {
+  return request(client.get<Stats>('/stats', withSignal(undefined, options)));
 }
 
 // ============ Indexes ============
 
 /** `GET /indexes`. Pass `true` to list only active indexes. Returns the unwrapped `data` array. */
-export async function getIndexes(isActive?: boolean): Promise<Index[]> {
+export async function getIndexes(isActive?: boolean, options: RequestOptions = {}): Promise<Index[]> {
   const response = await request<IndexesResponse>(
-    client.get<IndexesResponse>('/indexes', {
-      params: isActive === undefined ? undefined : { is_active: isActive },
-    }),
+    client.get<IndexesResponse>(
+      '/indexes',
+      withSignal({ params: isActive === undefined ? undefined : { is_active: isActive } }, options),
+    ),
   );
   return response.data;
 }
@@ -212,8 +225,8 @@ export async function startSync(indexCode: string, startDate?: string): Promise<
 }
 
 /** Without `syncId` the server returns the latest active job (404 when none exists). */
-export function getSyncProgress(syncId?: string): Promise<SyncProgress> {
-  return request(client.get<SyncProgress>('/sync/progress', { params: { sync_id: syncId } }));
+export function getSyncProgress(syncId?: string, options: RequestOptions = {}): Promise<SyncProgress> {
+  return request(client.get<SyncProgress>('/sync/progress', withSignal({ params: { sync_id: syncId } }, options)));
 }
 
 export async function stopSync(syncId?: string): Promise<SyncStopResponse> {
@@ -223,23 +236,29 @@ export async function stopSync(syncId?: string): Promise<SyncStopResponse> {
 
 // ============ Tickers ============
 
-export function getTickers(params: TickersQueryParams = {}): Promise<TickersResponse> {
-  return request(client.get<TickersResponse>('/tickers', { params }));
+export function getTickers(params: TickersQueryParams = {}, options: RequestOptions = {}): Promise<TickersResponse> {
+  return request(client.get<TickersResponse>('/tickers', withSignal({ params }, options)));
 }
 
-export function getTicker(symbol: string): Promise<TickerDetails> {
-  return request(client.get<TickerDetails>(`/tickers/${encodeURIComponent(symbol)}`));
+export function getTicker(symbol: string, options: RequestOptions = {}): Promise<TickerDetails> {
+  return request(client.get<TickerDetails>(`/tickers/${encodeURIComponent(symbol)}`, withSignal(undefined, options)));
 }
 
-export function getChartData(symbol: string, params: ChartQueryParams = {}): Promise<ChartDataResponse> {
-  return request(client.get<ChartDataResponse>(`/tickers/${encodeURIComponent(symbol)}/chart`, { params }));
+export function getChartData(
+  symbol: string,
+  params: ChartQueryParams = {},
+  options: RequestOptions = {},
+): Promise<ChartDataResponse> {
+  return request(
+    client.get<ChartDataResponse>(`/tickers/${encodeURIComponent(symbol)}/chart`, withSignal({ params }, options)),
+  );
 }
 
 // ============ Screener ============
 
 /** Generic screener: preset mode returns `{ preset, results }`, custom filters return `{ total, results }`. */
-export function getScreener(params: ScreenerQueryParams = {}): Promise<ScreenerResponse> {
-  return request(client.get<ScreenerResponse>('/screener', { params }));
+export function getScreener(params: ScreenerQueryParams = {}, options: RequestOptions = {}): Promise<ScreenerResponse> {
+  return request(client.get<ScreenerResponse>('/screener', withSignal({ params }, options)));
 }
 
 // ============ Divergences ============
@@ -247,13 +266,15 @@ export function getScreener(params: ScreenerQueryParams = {}): Promise<ScreenerR
 export function getTickerDivergences(
   symbol: string,
   params: DivergenceConfigParams = {},
+  options: RequestOptions = {},
 ): Promise<TickerDivergencesResponse> {
   // `limit` only exists on the screener endpoint.
   const { limit: _limit, ...chartParams } = params;
   return request(
-    client.get<TickerDivergencesResponse>(`/charts/${encodeURIComponent(symbol)}/divergences`, {
-      params: chartParams,
-    }),
+    client.get<TickerDivergencesResponse>(
+      `/charts/${encodeURIComponent(symbol)}/divergences`,
+      withSignal({ params: chartParams }, options),
+    ),
   );
 }
 
@@ -261,8 +282,14 @@ export function getTickerDivergences(
 export function getDivergenceScreener(
   days = 7,
   params: DivergenceConfigParams = {},
+  options: RequestOptions = {},
 ): Promise<DivergenceScreenerResponse> {
-  return request(client.get<DivergenceScreenerResponse>('/screener/divergences', { params: { days, ...params } }));
+  return request(
+    client.get<DivergenceScreenerResponse>(
+      '/screener/divergences',
+      withSignal({ params: { days, ...params } }, options),
+    ),
+  );
 }
 
 // ============ Triangles ============
@@ -270,15 +297,17 @@ export function getDivergenceScreener(
 export async function getTickerTriangles(
   symbol: string,
   params: TriangleConfigParams = {},
+  options: RequestOptions = {},
 ): Promise<TickerTrianglesResponse> {
   // The ticker endpoint has no `state`, `index_code` or `limit` params (those are screener-only);
   // `state` is applied client-side so the ticker page keeps its existing filter behaviour.
   const { state, index_code: _indexCode, limit: _limit, triangle_types, ...chartParams } = params;
 
   const response = await request(
-    client.get<TickerTrianglesResponse>(`/charts/${encodeURIComponent(symbol)}/triangles`, {
-      params: { ...chartParams, triangle_types: csv(triangle_types) },
-    }),
+    client.get<TickerTrianglesResponse>(
+      `/charts/${encodeURIComponent(symbol)}/triangles`,
+      withSignal({ params: { ...chartParams, triangle_types: csv(triangle_types) } }, options),
+    ),
   );
 
   if (!state || state === 'all') {
@@ -289,11 +318,16 @@ export async function getTickerTriangles(
 }
 
 /** `days` is the lookback window (contract: 1-30, default 7). */
-export function getTriangleScreener(days = 7, params: TriangleConfigParams = {}): Promise<TriangleScreenerResponse> {
+export function getTriangleScreener(
+  days = 7,
+  params: TriangleConfigParams = {},
+  options: RequestOptions = {},
+): Promise<TriangleScreenerResponse> {
   const { triangle_types, ...rest } = params;
   return request(
-    client.get<TriangleScreenerResponse>('/screener/triangles', {
-      params: { days, ...rest, triangle_types: csv(triangle_types) },
-    }),
+    client.get<TriangleScreenerResponse>(
+      '/screener/triangles',
+      withSignal({ params: { days, ...rest, triangle_types: csv(triangle_types) } }, options),
+    ),
   );
 }

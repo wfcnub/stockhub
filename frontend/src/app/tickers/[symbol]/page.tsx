@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
-  TickerDetails,
   ChartDataPoint,
   TimeRangeValue,
   DivergenceEvent,
@@ -13,9 +13,14 @@ import type {
   TriangleConfigParams,
   MACDMovingAverageType,
 } from '@/types';
-import { getTicker, getChartData, getTickerDivergences, getTickerTriangles } from '@/lib/api';
+import { chartQuery, tickerDivergencesQuery, tickerQuery, tickerTrianglesQuery } from '@/lib/queries';
 import { KeyMetrics, TickerChart, MACDChart } from '@/components/ticker';
 import { ControlShell } from '@/components/layout/ControlShell';
+
+// Stable empty references so memoised values do not change identity on every render.
+const EMPTY_CHART_DATA: ChartDataPoint[] = [];
+const EMPTY_DIVERGENCES: DivergenceEvent[] = [];
+const EMPTY_TRIANGLES: TriangleEvent[] = [];
 
 const DEFAULT_MA_PERIODS = [10, 15, 20, 50, 100, 200];
 
@@ -56,14 +61,6 @@ export default function TickerDetailPage() {
   const searchParams = useSearchParams();
   const symbol = params.symbol as string;
 
-  const [ticker, setTicker] = useState<TickerDetails | null>(null);
-  const [rawChartData, setRawChartData] = useState<ChartDataPoint[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [chartLoading, setChartLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [chartError, setChartError] = useState<string | null>(null);
-  const [divergences, setDivergences] = useState<DivergenceEvent[]>([]);
-  const [triangles, setTriangles] = useState<TriangleEvent[]>([]);
   const [selectedRange, setSelectedRange] = useState<TimeRangeValue>('ALL');
   const [selectedMA, setSelectedMA] = useState<number[]>(DEFAULT_MA_PERIODS);
   const [selectedMacdType, setSelectedMacdType] = useState<MACDMovingAverageType>('sma');
@@ -112,36 +109,28 @@ export default function TickerDetailPage() {
     };
   }, [searchParams]);
 
-  const fetchTicker = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const tickerResult = useQuery(tickerQuery(symbol));
+  const chartResult = useQuery({
+    ...chartQuery(symbol, {
+      range: selectedRange,
+      ma_periods: selectedMA.length > 0 ? selectedMA.join(',') : undefined,
+    }),
+    // Keep showing the previous range/MA data (under the loading overlay) while the next one loads.
+    placeholderData: keepPreviousData,
+  });
+  // Divergence and triangle overlays are optional: a failed request never blocks the main chart,
+  // it just shows no overlay.
+  const divergencesResult = useQuery(tickerDivergencesQuery(symbol, { include_invalidated: true }));
+  const trianglesResult = useQuery(tickerTrianglesQuery(symbol, triangleQueryParams));
 
-    try {
-      const data = await getTicker(symbol);
-      setTicker(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load ticker');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [symbol]);
-
-  const fetchChartData = useCallback(async () => {
-    setChartLoading(true);
-    setChartError(null);
-
-    try {
-      const response = await getChartData(symbol, {
-        range: selectedRange,
-        ma_periods: selectedMA.length > 0 ? selectedMA.join(',') : undefined,
-      });
-      setRawChartData(response.data);
-    } catch (err) {
-      setChartError(err instanceof Error ? err.message : 'Failed to load chart data');
-    } finally {
-      setChartLoading(false);
-    }
-  }, [symbol, selectedRange, selectedMA]);
+  const ticker = tickerResult.data ?? null;
+  const isLoading = tickerResult.isPending;
+  const error = tickerResult.error ? tickerResult.error.message : null;
+  const rawChartData = chartResult.data?.data ?? EMPTY_CHART_DATA;
+  const chartLoading = chartResult.isFetching;
+  const chartError = chartResult.error ? chartResult.error.message : null;
+  const divergences = divergencesResult.data?.events ?? EMPTY_DIVERGENCES;
+  const triangles = trianglesResult.data?.events ?? EMPTY_TRIANGLES;
 
   const macdChartData = useMemo(() => {
     return rawChartData.map((point) => {
@@ -169,41 +158,6 @@ export default function TickerDetailPage() {
   const isSelectedMacdModeAvailable = useMemo(() => {
     return rawChartData.some((point) => Boolean(point.indicators.macd_modes?.[selectedMacdType]));
   }, [rawChartData, selectedMacdType]);
-
-  const fetchDivergences = useCallback(async () => {
-    try {
-      const response = await getTickerDivergences(symbol, { include_invalidated: true });
-      setDivergences(response.events);
-    } catch {
-      setDivergences([]);
-    }
-  }, [symbol]);
-
-  const fetchTriangles = useCallback(async () => {
-    try {
-      const response = await getTickerTriangles(symbol, triangleQueryParams);
-      setTriangles(response.events);
-    } catch {
-      // Triangle overlays are optional and should never block the main chart module.
-      setTriangles([]);
-    }
-  }, [symbol, triangleQueryParams]);
-
-  useEffect(() => {
-    fetchTicker();
-  }, [fetchTicker]);
-
-  useEffect(() => {
-    fetchChartData();
-  }, [fetchChartData]);
-
-  useEffect(() => {
-    fetchDivergences();
-  }, [fetchDivergences]);
-
-  useEffect(() => {
-    fetchTriangles();
-  }, [fetchTriangles]);
 
   if (isLoading) {
     return (

@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import type { TickerListItem, Index } from '@/types';
-import { getIndexes, getTickers } from '@/lib/api';
+import { indexesQuery, tickersQuery } from '@/lib/queries';
 import { ControlShell } from '@/components/layout/ControlShell';
 
 const DEFAULT_ITEMS_PER_PAGE = 10;
@@ -28,11 +28,6 @@ function TickersContent() {
   const initialSortBy: SortField = searchParams.get('sort_by') === 'name' ? 'name' : 'symbol';
   const initialSortOrder: SortOrder = searchParams.get('sort_order') === 'desc' ? 'desc' : 'asc';
 
-  const [tickers, setTickers] = useState<TickerListItem[]>([]);
-  const [indexes, setIndexes] = useState<Index[]>([]);
-  const [total, setTotal] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [selectedIndex, setSelectedIndex] = useState(initialIndex);
@@ -41,46 +36,32 @@ function TickersContent() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
   const [page, setPage] = useState(initialPage);
 
-  const fetchTickers = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const tickersResult = useQuery(
+    tickersQuery({
+      offset: page * itemsPerPage,
+      limit: itemsPerPage,
+      search: searchQuery || undefined,
+      index: selectedIndex || undefined,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    }),
+  );
+  // Keep the index filter available with only the default option even if index loading fails.
+  const indexes = useQuery(indexesQuery(true)).data ?? [];
 
-    try {
-      const response = await getTickers({
-        offset: page * itemsPerPage,
-        limit: itemsPerPage,
-        search: searchQuery || undefined,
-        index: selectedIndex || undefined,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-      });
+  const tickers = tickersResult.data?.data ?? [];
+  const total = tickersResult.data?.total ?? 0;
+  const isLoading = tickersResult.isFetching;
+  const error = tickersResult.error ? tickersResult.error.message : null;
 
-      setTickers(response.data);
-      setTotal(response.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load tickers');
-    } finally {
-      setIsLoading(false);
+  // Clamp the page once a result is in (e.g. the URL asked for a page beyond the last one). Adjusting
+  // state while rendering is React's recommended alternative to an effect for derived state.
+  if (tickersResult.isSuccess && !tickersResult.isFetching) {
+    const maxPage = Math.max(0, Math.ceil(total / itemsPerPage) - 1);
+    if (page > maxPage) {
+      setPage(maxPage);
     }
-  }, [page, itemsPerPage, searchQuery, selectedIndex, sortBy, sortOrder]);
-
-  useEffect(() => {
-    fetchTickers();
-  }, [fetchTickers]);
-
-  useEffect(() => {
-    const fetchIndexes = async () => {
-      try {
-        const data = await getIndexes(true);
-        setIndexes(data);
-      } catch {
-        // Keep the index filter available with the default option even if index loading fails.
-        setIndexes([]);
-      }
-    };
-
-    void fetchIndexes();
-  }, []);
+  }
 
   // Update URL params when filters/pagination change.
   useEffect(() => {
@@ -101,15 +82,6 @@ function TickersContent() {
 
     router.replace(`/tickers${queryString ? `?${queryString}` : ''}`, { scroll: false });
   }, [searchQuery, selectedIndex, itemsPerPage, page, sortBy, sortOrder, router, searchParams]);
-
-  useEffect(() => {
-    if (isLoading) {
-      return;
-    }
-
-    const maxPage = Math.max(0, Math.ceil(total / itemsPerPage) - 1);
-    setPage((currentPage) => (currentPage > maxPage ? maxPage : currentPage));
-  }, [total, itemsPerPage, isLoading]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
