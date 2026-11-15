@@ -1,4 +1,4 @@
-# StockHub API Contract (v1.1.1)
+# StockHub API Contract (v1.2.0)
 
 > **Source of Truth** - This document defines the API contract. Backend must implement these endpoints. Frontend must consume these endpoints.
 
@@ -773,7 +773,7 @@ Possible errors:
 
 ### POST /sync/start
 
-Starts a background sync for one index.
+Creates a sync job for one index and starts the sync worker (`python -m app.sync run --sync-id <id>`) as a separate process. The sync never runs inside the API process.
 
 **Query Parameters:**
 | Name | Type | Required | Description |
@@ -784,16 +784,29 @@ Starts a background sync for one index.
 **Response:**
 ```json
 {
-  "sync_id": "sync_20260410_103000",
+  "sync_id": "sync_20260410_103000_1a2b3c4d",
   "index_code": "JCI",
   "status": "in_progress",
   "message": "Sync started for JCI"
 }
 ```
 
+Errors:
+| Status | When |
+|--------|------|
+| 400 | `start_date` is not `YYYY-MM-DD` (`{"detail": "start_date must be YYYY-MM-DD"}`) |
+| 404 | Unknown `index_code` |
+| 409 | A sync for this index is already active (checked after stale jobs are cleaned up) |
+| 500 | The worker process could not be started (`{"detail": "Could not start sync worker"}`); the job is marked `failed` |
+
 Notes:
-- API returns `in_progress` immediately.
-- DB row is created as `pending` and transitions in background worker.
+- `sync_id` format: `sync_<UTC YYYYMMDD_HHMMSS>_<8 hex chars>`, unique per job.
+- API returns `in_progress` immediately. The DB row is created as `pending` and the worker moves it on.
+- One sync per index at a time (PostgreSQL advisory lock). A job whose worker is gone is marked `failed` on the next worker or API start; a fresh `pending` job gets a grace period (`SYNC_PENDING_GRACE_SECONDS`, default 300).
+- Today's bar is stored only once it is final, after `SYNC_BAR_FINAL_AFTER` (default 17:00 Asia/Jakarta). Each run re-fetches the last `SYNC_REFETCH_DAYS` (default 7) days so source revisions are applied.
+- A job is `failed` only if every ticker failed; otherwise it is `completed` and `progress.failed_tickers` counts the failures (details per ticker in `sync_status.error_message`).
+- The scheduled daily sync runs the same worker from a systemd timer (`python -m app.sync run --index JCI`), not through this endpoint.
+- Through the frontend proxy this endpoint is blocked (`405`) until the admin token exists.
 
 ### GET /sync/progress
 
@@ -814,6 +827,7 @@ Returns progress for one sync job.
     "processed_tickers": 425,
     "percent_complete": 50,
     "current_ticker": "BBCA",
+    "failed_tickers": 3,
     "estimated_remaining_seconds": 850
   }
 }
@@ -990,6 +1004,7 @@ Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2.0 | 2026-11-15 | Sync runs in a separate worker process (`python -m app.sync`), never in the API. `POST /sync/start` now returns `409` when a sync for the index is active, `400` for a bad `start_date` and `500` if the worker can't start; `sync_id` gains a random suffix. `GET /sync/progress` adds `progress.failed_tickers`. Today's bar is stored only after the IDX close (configurable). |
 | 1.1.1 | 2026-11-15 | `GET /health` now checks the database and returns `503` with `{status: unhealthy}` when it is unavailable. `GET /` reports the backend package version (`1.1.0`). Fixed route order so `GET /indicators/available-types` is no longer shadowed by `/indicators/{ticker_symbol}`. No request or response shape changes otherwise. |
 | 1.1.0 | 2026-04-28 | Stable triangle feature release: Full documentation of `/charts/{ticker_symbol}/triangles` and `/screener/triangles` endpoints with triangle-type (symmetrical, ascending, descending), state (potential, breakout), direction (bullish, bearish), confidence progression (1-2+ closes), volume ratio, and all supporting query parameters. Triangle detection is on-demand from existing `prices` data (no schema changes). Frontend integration complete with ticker chart overlays and screener mode switching. Also aligned invalidation logic across screener and chart divergence endpoints: backend now uses `low <= invalidation_level` (was `close`), emerging events are now checked for invalidation alongside aggressive, chart endpoint (`/charts/{ticker_symbol}/divergences`) now supports `include_invalidated` param and returns `is_invalidated` per row and `include_invalidated` in response envelope to match screener behavior. Frontend TickerChart now uses server-provided `is_invalidated` instead of client-side duplicate logic. |
 | 1.0.7 | 2026-04-18 | Added optional `breakout_relaxed` query param to triangle endpoints (`/charts/{ticker_symbol}/triangles`, `/screener/triangles`) to use lower breakout buffer and increase breakout sensitivity. Also fixed triangle formation validation window so boundary fitting excludes most recent bars; this enables valid breakout detection instead of suppressing breakout states. |

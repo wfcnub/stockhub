@@ -1,4 +1,4 @@
-# StockHub Database Design (v1.2.0)
+# StockHub Database Design (v1.3.0)
 
 > **Source of Truth** - This document defines the database schema. The engine is **PostgreSQL 18 only** (SQLite is no longer supported). The schema is created and changed **only through Alembic migrations** in `backend/migrations/` (`uv run alembic upgrade head`); the SQLAlchemy models in `backend/app/models/` must match the latest revision, which `alembic check` verifies in the tests.
 
@@ -221,6 +221,7 @@ Tracks batch operations for the landing page progress UI.
 | status | VARCHAR(20) | NOT NULL, DEFAULT 'pending', CHECK | pending, in_progress, running (legacy), completed, failed, cancelled (`ck_sync_jobs_status_valid`; indexed, `ix_sync_jobs_status`) |
 | total_tickers | INTEGER | NOT NULL, DEFAULT 0 | Total tickers in batch |
 | processed_tickers | INTEGER | NOT NULL, DEFAULT 0 | Count for progress bar |
+| failed_tickers | INTEGER | NOT NULL, DEFAULT 0 | Tickers that failed in this job (rev 0002); per-ticker details in `sync_status.error_message` |
 | current_ticker | VARCHAR(20) | NULL | Currently processing ticker |
 | started_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Job start time |
 | completed_at | TIMESTAMPTZ | NULL | Job completion time |
@@ -252,7 +253,7 @@ Tracks batch operations for the landing page progress UI.
 
 ## SQL Schema
 
-Generated from Alembic revision `0001_baseline` (`uv run alembic upgrade head --sql`, without the `alembic_version` table).
+Generated from Alembic revisions `0001_baseline` and `0002_sync_jobs_failed_tickers` (`uv run alembic upgrade head --sql`, without the `alembic_version` table).
 
 ```sql
 CREATE TABLE indexes (
@@ -291,6 +292,7 @@ CREATE TABLE sync_jobs (
     status VARCHAR(20) DEFAULT 'pending' NOT NULL,
     total_tickers INTEGER DEFAULT 0 NOT NULL,
     processed_tickers INTEGER DEFAULT 0 NOT NULL,
+    failed_tickers INTEGER DEFAULT 0 NOT NULL,  -- added in 0002
     current_ticker VARCHAR(20),
     started_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     completed_at TIMESTAMP WITH TIME ZONE,
@@ -377,6 +379,7 @@ CREATE TABLE technical_indicators (
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3.0 | 2026-11-15 | Revision `0002`: `sync_jobs.failed_tickers INTEGER NOT NULL DEFAULT 0`. Sync upserts use `ON CONFLICT` on `uq_prices_ticker_id_date` and `uq_technical_indicators_natural_key` and skip unchanged rows. |
 | 1.2.0 | 2026-11-15 | PostgreSQL 18 only, and the schema is managed by Alembic (`0001_baseline`), replacing `init_db.py` and SQLite support. Natural key `uq_technical_indicators_natural_key UNIQUE NULLS NOT DISTINCT (ticker_id, indicator_type, window_period, date)` replaces `ix_ticker_indicator_date`. `prices.id` and `technical_indicators.id` are BIGSERIAL. `ON DELETE CASCADE` on all ticker and index foreign keys (index hard delete now cascades as the API documents). NOT NULL with server defaults on flags, counters, statuses and creation timestamps. CHECK constraints on `sync_status.status` and `sync_jobs.status`. All timestamps are TIMESTAMPTZ. Constraint names follow the `pk_/uq_/fk_/ck_/ix_` convention. Redundant indexes are dropped and `ix_prices_date` is added. No upgrade path from older databases (fresh start). |
 | 1.1.0 | 2026-04-28 | Triangle pattern feature complete: on-demand detection for symmetrical, ascending, and descending triangles with potential and breakout states via `/charts/{ticker_symbol}/triangles` and `/screener/triangles` APIs. No schema changes; detection runs on-demand from existing `prices` data. |
 | 1.0.1 | 2026-04-14 | Documented MACD mode-aware storage conventions in `technical_indicators` using `indicator_type` values `macd_sma` and `macd_ema`, plus legacy `macd` compatibility during migration/backfill. |
