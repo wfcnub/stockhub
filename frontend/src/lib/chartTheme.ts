@@ -39,9 +39,11 @@ function readChannels(styles: CSSStyleDeclaration | null, name: string, fallback
   return value ? value : fallback;
 }
 
+// Comma syntax on purpose: Lightweight Charts parses colour strings itself and legacy rgb()/rgba() is the
+// format every browser it supports understands.
 function rgb(channels: string, alpha?: number): string {
-  const normalized = channels.replace(/\s+/g, ' ').trim();
-  return alpha === undefined ? `rgb(${normalized})` : `rgb(${normalized} / ${alpha})`;
+  const parts = channels.trim().split(/\s+/).join(', ');
+  return alpha === undefined ? `rgb(${parts})` : `rgba(${parts}, ${alpha})`;
 }
 
 export function getChartThemeColors(): ChartThemeColors {
