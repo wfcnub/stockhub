@@ -79,10 +79,14 @@ def get_ticker_divergences(
     ),
     db: Session = Depends(get_db),
 ):
-    ticker = db.query(Ticker).filter(
-        Ticker.symbol == ticker_symbol.upper(),
-        Ticker.is_active,
-    ).first()
+    ticker = (
+        db.query(Ticker)
+        .filter(
+            Ticker.symbol == ticker_symbol.upper(),
+            Ticker.is_active,
+        )
+        .first()
+    )
 
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")

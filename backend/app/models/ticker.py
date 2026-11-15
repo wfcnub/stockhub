@@ -20,9 +20,13 @@ class Ticker(Base):
     # Relationships
     index = relationship("Index", back_populates="tickers")
     prices = relationship("DailyPrice", back_populates="ticker", cascade="all, delete-orphan")
-    indicators = relationship("TechnicalIndicator", back_populates="ticker", cascade="all, delete-orphan")
+    indicators = relationship(
+        "TechnicalIndicator", back_populates="ticker", cascade="all, delete-orphan"
+    )
     key_metrics = relationship("KeyMetric", back_populates="ticker", cascade="all, delete-orphan")
-    sync_status = relationship("SyncStatus", back_populates="ticker", uselist=False, cascade="all, delete-orphan")
+    sync_status = relationship(
+        "SyncStatus", back_populates="ticker", uselist=False, cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<Ticker(symbol={self.symbol})>"

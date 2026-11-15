@@ -168,9 +168,7 @@ def get_ticker_triangles(
     db: Session = Depends(get_db),
 ):
     ticker = (
-        db.query(Ticker)
-        .filter(Ticker.symbol == ticker_symbol.upper(), Ticker.is_active)
-        .first()
+        db.query(Ticker).filter(Ticker.symbol == ticker_symbol.upper(), Ticker.is_active).first()
     )
 
     if not ticker:
@@ -284,9 +282,7 @@ def get_triangle_screener(
     if index_code:
         normalized_index_code = index_code.strip().upper()
         index_record = (
-            db.query(Index)
-            .filter(Index.code == normalized_index_code, Index.is_active)
-            .first()
+            db.query(Index).filter(Index.code == normalized_index_code, Index.is_active).first()
         )
         if not index_record:
             raise HTTPException(status_code=404, detail="Index not found")

@@ -24,7 +24,9 @@ def test_cors_origins_json_list(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings(_env_file=None).CORS_ORIGINS == ["http://a.test", "http://b.test"]
 
 
-def test_env_file_written_by_start_sh_loads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_file_written_by_start_sh_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Same shape as the .env that start.sh writes, including keys the backend did not know.
     for key in ("DATABASE_URL", "CORS_ORIGINS", "ACTIVE_EXCHANGES"):
         monkeypatch.delenv(key, raising=False)

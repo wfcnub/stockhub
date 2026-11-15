@@ -7,12 +7,15 @@ from app.db.database import Base
 
 class SyncJob(Base):
     """Model for tracking sync job progress"""
+
     __tablename__ = "sync_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
     sync_id = Column(String(100), unique=True, nullable=False, index=True)  # Unique job identifier
     index_id = Column(Integer, ForeignKey("indexes.id"), nullable=False, index=True)
-    status = Column(String(20), default="pending", nullable=False)  # pending, running, completed, failed
+    status = Column(
+        String(20), default="pending", nullable=False
+    )  # pending, running, completed, failed
     total_tickers = Column(Integer, default=0)
     processed_tickers = Column(Integer, default=0)
     current_ticker = Column(String(20))  # Symbol of currently processing ticker

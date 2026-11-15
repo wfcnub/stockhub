@@ -18,12 +18,12 @@ def get_available_indicator_types():
             {
                 "type": "sma",
                 "name": "Simple Moving Average",
-                "default_periods": [5, 10, 15, 20, 50, 100, 200]
+                "default_periods": [5, 10, 15, 20, 50, 100, 200],
             },
             {
                 "type": "ema",
                 "name": "Exponential Moving Average",
-                "default_periods": [5, 10, 15, 20, 50, 100, 200]
+                "default_periods": [5, 10, 15, 20, 50, 100, 200],
             },
             {
                 "type": "macd",
@@ -34,16 +34,12 @@ def get_available_indicator_types():
                 "default_mode": "sma",
                 "storage_types": ["macd_sma", "macd_ema"],
             },
-            {
-                "type": "rsi",
-                "name": "Relative Strength Index",
-                "default_periods": [14]
-            },
+            {"type": "rsi", "name": "Relative Strength Index", "default_periods": [14]},
             {
                 "type": "vwap",
                 "name": "Volume Weighted Average Price",
-                "default_periods": None  # Daily calculation
-            }
+                "default_periods": None,  # Daily calculation
+            },
         ]
     }
 
@@ -52,15 +48,13 @@ def get_available_indicator_types():
 def get_indicators(
     ticker_symbol: str,
     indicator_type: Optional[str] = Query(
-        None,
-        description="Filter by indicator type: sma, ema, macd, macd_sma, macd_ema, rsi, vwap"
+        None, description="Filter by indicator type: sma, ema, macd, macd_sma, macd_ema, rsi, vwap"
     ),
     window_period: Optional[int] = Query(
-        None,
-        description="Filter by window period (e.g., 14 for RSI, 20 for SMA)"
+        None, description="Filter by window period (e.g., 14 for RSI, 20 for SMA)"
     ),
     limit: int = Query(100, le=500),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get technical indicators for a ticker.
@@ -73,23 +67,21 @@ def get_indicators(
     if not ticker:
         return {"error": "Ticker not found"}
 
-    query = db.query(TechnicalIndicator).filter(
-        TechnicalIndicator.ticker_id == ticker.id
-    )
+    query = db.query(TechnicalIndicator).filter(TechnicalIndicator.ticker_id == ticker.id)
 
     if indicator_type:
         normalized_type = indicator_type.lower()
         if normalized_type == "macd":
-            query = query.filter(TechnicalIndicator.indicator_type.in_(["macd", "macd_sma", "macd_ema"]))
+            query = query.filter(
+                TechnicalIndicator.indicator_type.in_(["macd", "macd_sma", "macd_ema"])
+            )
         else:
             query = query.filter(TechnicalIndicator.indicator_type == normalized_type)
 
     if window_period:
         query = query.filter(TechnicalIndicator.window_period == window_period)
 
-    indicators = query.order_by(
-        TechnicalIndicator.date.desc()
-    ).limit(limit).all()
+    indicators = query.order_by(TechnicalIndicator.date.desc()).limit(limit).all()
 
     return {
         "ticker": ticker_symbol.upper(),
@@ -99,18 +91,15 @@ def get_indicators(
                 "indicator_type": ind.indicator_type,
                 "window_period": ind.window_period,
                 "value": float(ind.value) if ind.value else None,
-                "extra_data": ind.extra_data
+                "extra_data": ind.extra_data,
             }
             for ind in indicators
-        ]
+        ],
     }
 
 
 @router.get("/{ticker_symbol}/latest")
-def get_latest_indicators(
-    ticker_symbol: str,
-    db: Session = Depends(get_db)
-):
+def get_latest_indicators(ticker_symbol: str, db: Session = Depends(get_db)):
     """
     Get the most recent indicator values for a ticker.
     Returns the latest computed values for all indicator types.
@@ -120,9 +109,12 @@ def get_latest_indicators(
         return {"error": "Ticker not found"}
 
     # Get latest date for this ticker's indicators
-    latest_date = db.query(TechnicalIndicator.date).filter(
-        TechnicalIndicator.ticker_id == ticker.id
-    ).order_by(TechnicalIndicator.date.desc()).first()
+    latest_date = (
+        db.query(TechnicalIndicator.date)
+        .filter(TechnicalIndicator.ticker_id == ticker.id)
+        .order_by(TechnicalIndicator.date.desc())
+        .first()
+    )
 
     if not latest_date:
         return {"ticker": ticker_symbol.upper(), "date": None, "indicators": []}
@@ -130,10 +122,11 @@ def get_latest_indicators(
     latest_date = latest_date[0]
 
     # Get all indicators for that date
-    indicators = db.query(TechnicalIndicator).filter(
-        TechnicalIndicator.ticker_id == ticker.id,
-        TechnicalIndicator.date == latest_date
-    ).all()
+    indicators = (
+        db.query(TechnicalIndicator)
+        .filter(TechnicalIndicator.ticker_id == ticker.id, TechnicalIndicator.date == latest_date)
+        .all()
+    )
 
     return {
         "ticker": ticker_symbol.upper(),
@@ -143,8 +136,8 @@ def get_latest_indicators(
                 "indicator_type": ind.indicator_type,
                 "window_period": ind.window_period,
                 "value": float(ind.value) if ind.value else None,
-                "extra_data": ind.extra_data
+                "extra_data": ind.extra_data,
             }
             for ind in indicators
-        ]
+        ],
     }

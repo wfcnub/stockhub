@@ -8,16 +8,13 @@ import pandas as pd
 @dataclass
 class IndicatorResult:
     """Result of a technical indicator calculation for a single date"""
+
     date: date
     value: float
     metadata: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "date": self.date,
-            "value": self.value,
-            "metadata": self.metadata
-        }
+        return {"date": self.date, "value": self.value, "metadata": self.metadata}
 
 
 class BaseIndicator(ABC):
@@ -90,7 +87,7 @@ class BaseIndicator(ABC):
         self.validate_dataframe(df)
 
         # Ensure date column exists and is sorted
-        if 'date' in df.columns:
-            df = df.sort_values('date').reset_index(drop=True)
+        if "date" in df.columns:
+            df = df.sort_values("date").reset_index(drop=True)
 
         return df

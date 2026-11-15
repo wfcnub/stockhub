@@ -1,6 +1,7 @@
 """
 Index management router - CRUD operations for market indexes
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -44,7 +45,7 @@ router = APIRouter(prefix="/indexes", tags=["indexes"])
 @router.get("")
 def list_indexes(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     List all indexes with optional filtering.
@@ -69,18 +70,15 @@ def list_indexes(
                 "ticker_count": idx.ticker_count,
                 "is_active": idx.is_active,
                 "last_synced_at": idx.last_synced_at.isoformat() if idx.last_synced_at else None,
-                "created_at": idx.created_at.isoformat() if idx.created_at else None
+                "created_at": idx.created_at.isoformat() if idx.created_at else None,
             }
             for idx in indexes
-        ]
+        ],
     }
 
 
 @router.get("/{index_id}")
-def get_index(
-    index_id: int,
-    db: Session = Depends(get_db)
-):
+def get_index(index_id: int, db: Session = Depends(get_db)):
     """
     Get a single index by ID.
 
@@ -99,15 +97,12 @@ def get_index(
         "ticker_count": index.ticker_count,
         "is_active": index.is_active,
         "last_synced_at": index.last_synced_at.isoformat() if index.last_synced_at else None,
-        "created_at": index.created_at.isoformat() if index.created_at else None
+        "created_at": index.created_at.isoformat() if index.created_at else None,
     }
 
 
 @router.post("")
-def create_index(
-    index_data: IndexCreate,
-    db: Session = Depends(get_db)
-):
+def create_index(index_data: IndexCreate, db: Session = Depends(get_db)):
     """
     Create a new market index.
 
@@ -115,13 +110,15 @@ def create_index(
     """
     existing = db.query(Index).filter(Index.code == index_data.code.upper()).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"Index with code '{index_data.code}' already exists")
+        raise HTTPException(
+            status_code=400, detail=f"Index with code '{index_data.code}' already exists"
+        )
 
     index = Index(
         code=index_data.code.upper(),
         name=index_data.name,
         yfinance_suffix=index_data.yfinance_suffix or "",
-        is_active=True
+        is_active=True,
     )
     db.add(index)
     db.commit()
@@ -135,16 +132,12 @@ def create_index(
         "ticker_count": index.ticker_count,
         "is_active": index.is_active,
         "last_synced_at": index.last_synced_at.isoformat() if index.last_synced_at else None,
-        "created_at": index.created_at.isoformat() if index.created_at else None
+        "created_at": index.created_at.isoformat() if index.created_at else None,
     }
 
 
 @router.patch("/{index_id}")
-def update_index(
-    index_id: int,
-    index_data: IndexUpdate,
-    db: Session = Depends(get_db)
-):
+def update_index(index_id: int, index_data: IndexUpdate, db: Session = Depends(get_db)):
     """
     Update an existing index.
 
@@ -158,9 +151,15 @@ def update_index(
     # Update fields if provided
     if index_data.code is not None:
         # Check if new code already exists
-        existing = db.query(Index).filter(Index.code == index_data.code.upper(), Index.id != index_id).first()
+        existing = (
+            db.query(Index)
+            .filter(Index.code == index_data.code.upper(), Index.id != index_id)
+            .first()
+        )
         if existing:
-            raise HTTPException(status_code=400, detail=f"Index with code '{index_data.code}' already exists")
+            raise HTTPException(
+                status_code=400, detail=f"Index with code '{index_data.code}' already exists"
+            )
         index.code = index_data.code.upper()
     if index_data.name is not None:
         index.name = index_data.name
@@ -180,15 +179,17 @@ def update_index(
         "ticker_count": index.ticker_count,
         "is_active": index.is_active,
         "last_synced_at": index.last_synced_at.isoformat() if index.last_synced_at else None,
-        "created_at": index.created_at.isoformat() if index.created_at else None
+        "created_at": index.created_at.isoformat() if index.created_at else None,
     }
 
 
 @router.delete("/{index_id}")
 def delete_index(
     index_id: int,
-    hard_delete: bool = Query(False, description="Permanently delete the index (also deletes all associated tickers)"),
-    db: Session = Depends(get_db)
+    hard_delete: bool = Query(
+        False, description="Permanently delete the index (also deletes all associated tickers)"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Delete an index.
@@ -215,7 +216,7 @@ def delete_index(
             "hard_delete": True,
             "id": index_id,
             "code": index.code,
-            "message": f"Index '{index.code}' permanently deleted along with {ticker_count} associated tickers"
+            "message": f"Index '{index.code}' permanently deleted along with {ticker_count} associated tickers",
         }
     else:
         # Soft delete
@@ -227,5 +228,5 @@ def delete_index(
             "id": index_id,
             "code": index.code,
             "is_active": False,
-            "message": f"Index '{index.code}' deactivated (soft delete). Use hard_delete=true to permanently remove."
+            "message": f"Index '{index.code}' deactivated (soft delete). Use hard_delete=true to permanently remove.",
         }

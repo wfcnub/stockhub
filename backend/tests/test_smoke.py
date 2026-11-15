@@ -33,7 +33,13 @@ def test_available_types_is_not_shadowed_by_ticker_route() -> None:
     assert response.status_code == 200
     body = response.json()
     assert "indicator_types" in body
-    assert {item["type"] for item in body["indicator_types"]} >= {"sma", "ema", "macd", "rsi", "vwap"}
+    assert {item["type"] for item in body["indicator_types"]} >= {
+        "sma",
+        "ema",
+        "macd",
+        "rsi",
+        "vwap",
+    }
 
 
 def test_health_returns_503_when_database_is_down(monkeypatch) -> None:

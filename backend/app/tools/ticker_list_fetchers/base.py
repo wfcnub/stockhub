@@ -9,7 +9,7 @@ class TickerListFetcher(ABC):
     def fetch_tickers(self) -> List[str]:
         """
         Fetch and return list of ticker symbols.
-        
+
         Returns:
             List of ticker symbols in uppercase without suffix (e.g., "BBCA", "BBRI")
         """

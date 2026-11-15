@@ -11,9 +11,9 @@ from app.tools.ticker_list_fetchers import (
 )
 
 __all__ = [
-    'download_stock_data',
-    'TickerListFetcher',
-    'get_ticker_list_fetcher',
-    'register_fetcher',
-    'JciTickerListFetcher',
+    "download_stock_data",
+    "TickerListFetcher",
+    "get_ticker_list_fetcher",
+    "register_fetcher",
+    "JciTickerListFetcher",
 ]

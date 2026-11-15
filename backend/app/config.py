@@ -21,7 +21,7 @@ def _normalize_database_url(url: str) -> str:
     """Make the PostgreSQL driver explicit (psycopg 3); leave other URLs untouched."""
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
-            return "postgresql+psycopg://" + url[len(prefix):]
+            return "postgresql+psycopg://" + url[len(prefix) :]
     return url
 
 

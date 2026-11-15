@@ -27,7 +27,7 @@ def start_sync(
     background_tasks: BackgroundTasks,
     index_code: str = Query(..., description="Index code to sync (e.g., JCI)"),
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Start a sync job for all tickers in an index.
@@ -43,33 +43,29 @@ def start_sync(
 
     sync_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    total_tickers = db.query(Ticker).filter(
-        Ticker.index_id == index.id,
-        Ticker.is_active == True
-    ).count()
+    total_tickers = (
+        db.query(Ticker).filter(Ticker.index_id == index.id, Ticker.is_active == True).count()
+    )
 
     sync_job = SyncJob(
         sync_id=sync_id,
         index_id=index.id,
         status="pending",
         total_tickers=total_tickers,
-        processed_tickers=0
+        processed_tickers=0,
     )
     db.add(sync_job)
     db.commit()
 
     background_tasks.add_task(
-        run_sync_job,
-        sync_id=sync_id,
-        index_id=index.id,
-        start_date=start_date
+        run_sync_job, sync_id=sync_id, index_id=index.id, start_date=start_date
     )
 
     return {
         "sync_id": sync_id,
         "index_code": index_code.upper(),
         "status": "in_progress",
-        "message": f"Sync started for {index_code.upper()}"
+        "message": f"Sync started for {index_code.upper()}",
     }
 
 
@@ -79,7 +75,7 @@ def get_sync_progress(
         None,
         description="Sync job ID (optional; latest active job if omitted)",
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Poll sync job progress.
@@ -106,8 +102,8 @@ def get_sync_progress(
             "processed_tickers": sync_job.processed_tickers,
             "percent_complete": sync_job.progress_percent,
             "current_ticker": sync_job.current_ticker,
-            "estimated_remaining_seconds": estimated_seconds
-        }
+            "estimated_remaining_seconds": estimated_seconds,
+        },
     }
 
 
@@ -117,7 +113,7 @@ def stop_sync(
         None,
         description="Sync job ID (optional; latest active job if omitted)",
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Stop an active sync job.
@@ -134,7 +130,7 @@ def stop_sync(
         return {
             "sync_id": sync_job.sync_id,
             "status": api_status,
-            "message": f"Sync already {api_status}"
+            "message": f"Sync already {api_status}",
         }
 
     sync_job.status = "cancelled"
@@ -146,7 +142,7 @@ def stop_sync(
     return {
         "sync_id": sync_job.sync_id,
         "status": "cancelled",
-        "message": "Sync stopped successfully"
+        "message": "Sync stopped successfully",
     }
 
 
@@ -185,7 +181,7 @@ def _sync_ticker_worker(args):
     """Worker function for multiprocessing ticker sync"""
     ticker_id, start_date = args
     from app.db.database import SessionLocal
-    
+
     db = SessionLocal()
     try:
         ticker = db.query(Ticker).filter(Ticker.id == ticker_id).first()
@@ -201,7 +197,9 @@ def _sync_ticker_worker(args):
         db.close()
 
 
-def run_sync_job(sync_id: str, index_id: int, start_date: Optional[str] = None, max_workers: int = 4):
+def run_sync_job(
+    sync_id: str, index_id: int, start_date: Optional[str] = None, max_workers: int = 4
+):
     """Background task to run sync job with multiprocessing"""
     from app.db.database import SessionLocal
 
@@ -239,31 +237,30 @@ def run_sync_job(sync_id: str, index_id: int, start_date: Optional[str] = None, 
             db.commit()
             return
 
-        tickers = db.query(Ticker).filter(
-            Ticker.index_id == index_id,
-            Ticker.is_active == True
-        ).all()
+        tickers = (
+            db.query(Ticker).filter(Ticker.index_id == index_id, Ticker.is_active == True).all()
+        )
 
         sync_job.total_tickers = len(tickers)
         db.commit()
 
         ticker_args = [(ticker.id, start_date) for ticker in tickers]
-        
+
         with multiprocessing.Pool(processes=max_workers) as pool:
             processed = 0
             for ticker_id, success in pool.imap_unordered(_sync_ticker_worker, ticker_args):
                 processed += 1
-                
+
                 db.refresh(sync_job)
                 if sync_job.status == "cancelled":
                     pool.terminate()
                     break
-                
+
                 ticker = next((t for t in tickers if t.id == ticker_id), None)
                 sync_job.current_ticker = ticker.symbol if ticker else None
                 sync_job.processed_tickers = processed
                 db.commit()
-        
+
         pool.join()
 
         db.refresh(sync_job)
@@ -279,10 +276,9 @@ def run_sync_job(sync_id: str, index_id: int, start_date: Optional[str] = None, 
         sync_job.current_ticker = None
 
         index.last_synced_at = datetime.now()
-        index.ticker_count = db.query(Ticker).filter(
-            Ticker.index_id == index_id,
-            Ticker.is_active == True
-        ).count()
+        index.ticker_count = (
+            db.query(Ticker).filter(Ticker.index_id == index_id, Ticker.is_active == True).count()
+        )
 
         db.commit()
 
@@ -303,7 +299,7 @@ def init_index(
     code: str = Query(..., description="Index code (e.g., JCI)"),
     name: str = Query(..., description="Index name"),
     yfinance_suffix: str = Query("", description="Yahoo Finance suffix (e.g., .JK for IDX)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Initialize an index in the database.
@@ -314,12 +310,7 @@ def init_index(
     if existing:
         raise HTTPException(status_code=400, detail=f"Index {code} already exists")
 
-    index = Index(
-        code=code.upper(),
-        name=name,
-        yfinance_suffix=yfinance_suffix,
-        is_active=True
-    )
+    index = Index(code=code.upper(), name=name, yfinance_suffix=yfinance_suffix, is_active=True)
     db.add(index)
     db.commit()
     db.refresh(index)
@@ -328,15 +319,12 @@ def init_index(
         "id": index.id,
         "code": index.code,
         "name": index.name,
-        "yfinance_suffix": index.yfinance_suffix
+        "yfinance_suffix": index.yfinance_suffix,
     }
 
 
 @router.post("/discover/{index_code}")
-def discover_tickers(
-    index_code: str,
-    db: Session = Depends(get_db)
-):
+def discover_tickers(index_code: str, db: Session = Depends(get_db)):
     """
     Discover and sync ticker list for an index from the remote source.
 
@@ -352,10 +340,9 @@ def discover_tickers(
     try:
         result = sync_service.sync_index_ticker_list(index)
 
-        index.ticker_count = db.query(Ticker).filter(
-            Ticker.index_id == index.id,
-            Ticker.is_active == True
-        ).count()
+        index.ticker_count = (
+            db.query(Ticker).filter(Ticker.index_id == index.id, Ticker.is_active == True).count()
+        )
         db.commit()
 
         return {
@@ -364,7 +351,7 @@ def discover_tickers(
             "deactivated": result["deactivated"],
             "reactivated": result["reactivated"],
             "total_remote": result["total_remote"],
-            "total_active_tickers": index.ticker_count
+            "total_active_tickers": index.ticker_count,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to sync ticker list: {str(e)}")
@@ -378,6 +365,7 @@ def get_sync_status(symbol: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Ticker not found")
 
     from app.models import SyncStatus
+
     sync_status = db.query(SyncStatus).filter(SyncStatus.ticker_id == ticker.id).first()
 
     return {
@@ -390,5 +378,5 @@ def get_sync_status(symbol: str, db: Session = Depends(get_db)):
             if sync_status and sync_status.last_sync_timestamp
             else None
         ),
-        "status": sync_status.status if sync_status else "never_synced"
+        "status": sync_status.status if sync_status else "never_synced",
     }

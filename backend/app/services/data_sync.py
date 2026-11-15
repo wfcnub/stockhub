@@ -1,6 +1,7 @@
 """
 Data synchronization service for downloading and updating stock data
 """
+
 import json
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
@@ -47,8 +48,7 @@ class DataSyncService:
 
         # Get existing tickers for this index
         db_tickers = {
-            t.symbol: t for t in
-            self.db.query(Ticker).filter(Ticker.index_id == index.id).all()
+            t.symbol: t for t in self.db.query(Ticker).filter(Ticker.index_id == index.id).all()
         }
         db_symbols = set(db_tickers.keys())
 
@@ -63,11 +63,7 @@ class DataSyncService:
 
         added_count = 0
         for symbol in new_symbols:
-            ticker = Ticker(
-                symbol=symbol,
-                index_id=index.id,
-                is_active=True
-            )
+            ticker = Ticker(symbol=symbol, index_id=index.id, is_active=True)
             self.db.add(ticker)
             added_count += 1
 
@@ -95,17 +91,18 @@ class DataSyncService:
 
     def get_last_sync_date(self, ticker_id: int) -> Optional[date]:
         """Get the last date for which we have price data"""
-        last_price = self.db.query(DailyPrice).filter(
-            DailyPrice.ticker_id == ticker_id
-        ).order_by(DailyPrice.date.desc()).first()
+        last_price = (
+            self.db.query(DailyPrice)
+            .filter(DailyPrice.ticker_id == ticker_id)
+            .order_by(DailyPrice.date.desc())
+            .first()
+        )
 
         return last_price.date if last_price else None
 
     def get_or_create_sync_status(self, ticker_id: int) -> SyncStatus:
         """Get or create sync status for a ticker"""
-        sync_status = self.db.query(SyncStatus).filter(
-            SyncStatus.ticker_id == ticker_id
-        ).first()
+        sync_status = self.db.query(SyncStatus).filter(SyncStatus.ticker_id == ticker_id).first()
 
         if not sync_status:
             sync_status = SyncStatus(ticker_id=ticker_id)
@@ -138,13 +135,17 @@ class DataSyncService:
             last_sync = self.get_last_sync_date(ticker.id)
             if last_sync:
                 # Start from day after last sync
-                start = (last_sync + timedelta(days=1)).strftime('%Y-%m-%d')
+                start = (last_sync + timedelta(days=1)).strftime("%Y-%m-%d")
             elif start_date:
                 start = start_date
             else:
-                start = '2021-01-01'  # Default start date
+                start = "2021-01-01"  # Default start date
 
-            end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+            end = (
+                datetime.now()
+                .replace(hour=23, minute=59, second=59, microsecond=0)
+                .strftime("%Y-%m-%d %H:%M:%S")
+            )
 
             # Download data with the appropriate suffix
             df = download_stock_data(ticker.symbol, start, end, suffix=suffix)
@@ -157,7 +158,7 @@ class DataSyncService:
                     "symbol": ticker.symbol,
                     "new_prices": 0,
                     "indicators_calculated": 0,
-                    "message": "No new data available"
+                    "message": "No new data available",
                 }
 
             # Insert prices
@@ -168,14 +169,14 @@ class DataSyncService:
 
             # Update sync status
             sync_status.status = "completed"
-            sync_status.last_sync_date = df['Date'].iloc[-1] if 'Date' in df.columns else None
+            sync_status.last_sync_date = df["Date"].iloc[-1] if "Date" in df.columns else None
             sync_status.last_sync_timestamp = datetime.now()
             self.db.commit()
 
             return {
                 "symbol": ticker.symbol,
                 "new_prices": prices_added,
-                "indicators_calculated": indicators_added
+                "indicators_calculated": indicators_added,
             }
 
         except Exception as e:
@@ -190,15 +191,14 @@ class DataSyncService:
         added = 0
 
         for _, row in df.iterrows():
-            date_val = row['Date']
+            date_val = row["Date"]
 
             # Check if price already exists
-            existing = self.db.query(DailyPrice).filter(
-                and_(
-                    DailyPrice.ticker_id == ticker_id,
-                    DailyPrice.date == date_val
-                )
-            ).first()
+            existing = (
+                self.db.query(DailyPrice)
+                .filter(and_(DailyPrice.ticker_id == ticker_id, DailyPrice.date == date_val))
+                .first()
+            )
 
             if existing:
                 continue
@@ -206,12 +206,14 @@ class DataSyncService:
             price = DailyPrice(
                 ticker_id=ticker_id,
                 date=date_val,
-                open=float(row['Open']) if pd.notna(row.get('Open')) else None,
-                high=float(row['High']) if pd.notna(row.get('High')) else None,
-                low=float(row['Low']) if pd.notna(row.get('Low')) else None,
-                close=float(row['Close']),
-                volume=int(row['Volume']) if pd.notna(row.get('Volume')) else None,
-                adj_close=float(row.get('Adj Close', row['Close'])) if pd.notna(row.get('Adj Close', row['Close'])) else None
+                open=float(row["Open"]) if pd.notna(row.get("Open")) else None,
+                high=float(row["High"]) if pd.notna(row.get("High")) else None,
+                low=float(row["Low"]) if pd.notna(row.get("Low")) else None,
+                close=float(row["Close"]),
+                volume=int(row["Volume"]) if pd.notna(row.get("Volume")) else None,
+                adj_close=float(row.get("Adj Close", row["Close"]))
+                if pd.notna(row.get("Adj Close", row["Close"]))
+                else None,
             )
             self.db.add(price)
             added += 1
@@ -222,40 +224,44 @@ class DataSyncService:
     def _calculate_and_insert_indicators(self, ticker_id: int) -> int:
         """Calculate all indicators and insert into database"""
         # Get all price data for this ticker
-        prices = self.db.query(DailyPrice).filter(
-            DailyPrice.ticker_id == ticker_id
-        ).order_by(DailyPrice.date.asc()).all()
+        prices = (
+            self.db.query(DailyPrice)
+            .filter(DailyPrice.ticker_id == ticker_id)
+            .order_by(DailyPrice.date.asc())
+            .all()
+        )
 
         if not prices:
             return 0
 
         # Convert to DataFrame for indicator calculation
-        df = pd.DataFrame([{
-            'date': p.date,
-            'open': p.open,
-            'high': p.high,
-            'low': p.low,
-            'close': p.close,
-            'volume': p.volume
-        } for p in prices])
+        df = pd.DataFrame(
+            [
+                {
+                    "date": p.date,
+                    "open": p.open,
+                    "high": p.high,
+                    "low": p.low,
+                    "close": p.close,
+                    "volume": p.volume,
+                }
+                for p in prices
+            ]
+        )
 
         indicators_added = 0
 
         # Calculate Moving Averages (SMA and EMA)
         for period in self.MA_PERIODS:
             # SMA
-            sma_indicator = IndicatorRegistry.get('sma', window=period)
+            sma_indicator = IndicatorRegistry.get("sma", window=period)
             results = sma_indicator.calculate(df)
-            indicators_added += self._save_indicator_results(
-                ticker_id, 'sma', period, results
-            )
+            indicators_added += self._save_indicator_results(ticker_id, "sma", period, results)
 
             # EMA
-            ema_indicator = IndicatorRegistry.get('ema', window=period)
+            ema_indicator = IndicatorRegistry.get("ema", window=period)
             results = ema_indicator.calculate(df)
-            indicators_added += self._save_indicator_results(
-                ticker_id, 'ema', period, results
-            )
+            indicators_added += self._save_indicator_results(ticker_id, "ema", period, results)
 
         # Calculate MACD in both modes so chart endpoints can switch without recomputing.
         indicators_added += self._save_macd_for_dataframe(
@@ -272,18 +278,14 @@ class DataSyncService:
         )
 
         # Calculate RSI (standard: 14)
-        rsi_indicator = IndicatorRegistry.get('rsi')
+        rsi_indicator = IndicatorRegistry.get("rsi")
         results = rsi_indicator.calculate(df)
-        indicators_added += self._save_indicator_results(
-            ticker_id, 'rsi', 14, results
-        )
+        indicators_added += self._save_indicator_results(ticker_id, "rsi", 14, results)
 
         # Calculate VWAP
-        vwap_indicator = IndicatorRegistry.get('vwap')
+        vwap_indicator = IndicatorRegistry.get("vwap")
         results = vwap_indicator.calculate(df)
-        indicators_added += self._save_indicator_results(
-            ticker_id, 'vwap', None, results
-        )
+        indicators_added += self._save_indicator_results(ticker_id, "vwap", None, results)
 
         return indicators_added
 
@@ -295,7 +297,7 @@ class DataSyncService:
         indicator_type: str,
     ) -> int:
         """Calculate and store MACD values for a DataFrame in one MA mode."""
-        macd_indicator = IndicatorRegistry.get('macd', ma_type=ma_type)
+        macd_indicator = IndicatorRegistry.get("macd", ma_type=ma_type)
         results = macd_indicator.calculate(df)
         return self._save_indicator_results(
             ticker_id=ticker_id,
@@ -304,7 +306,9 @@ class DataSyncService:
             results=results,
         )
 
-    def migrate_macd_modes(self, index_id: Optional[int] = None, include_inactive: bool = False) -> Dict[str, Any]:
+    def migrate_macd_modes(
+        self, index_id: Optional[int] = None, include_inactive: bool = False
+    ) -> Dict[str, Any]:
         """
         Migrate legacy MACD rows and backfill mode-specific MACD datasets.
 
@@ -330,22 +334,30 @@ class DataSyncService:
                 "message": "No tickers matched migration filter",
             }
 
-        legacy_rows = self.db.query(TechnicalIndicator).filter(
-            TechnicalIndicator.ticker_id.in_(ticker_ids),
-            TechnicalIndicator.indicator_type == self.MACD_LEGACY_TYPE,
-        ).all()
+        legacy_rows = (
+            self.db.query(TechnicalIndicator)
+            .filter(
+                TechnicalIndicator.ticker_id.in_(ticker_ids),
+                TechnicalIndicator.indicator_type == self.MACD_LEGACY_TYPE,
+            )
+            .all()
+        )
 
         legacy_rows_migrated = 0
         duplicate_legacy_rows_removed = 0
         for row in legacy_rows:
-            existing_ema = self.db.query(TechnicalIndicator).filter(
-                and_(
-                    TechnicalIndicator.ticker_id == row.ticker_id,
-                    TechnicalIndicator.date == row.date,
-                    TechnicalIndicator.indicator_type == self.MACD_EMA_TYPE,
-                    TechnicalIndicator.window_period == row.window_period,
+            existing_ema = (
+                self.db.query(TechnicalIndicator)
+                .filter(
+                    and_(
+                        TechnicalIndicator.ticker_id == row.ticker_id,
+                        TechnicalIndicator.date == row.date,
+                        TechnicalIndicator.indicator_type == self.MACD_EMA_TYPE,
+                        TechnicalIndicator.window_period == row.window_period,
+                    )
                 )
-            ).first()
+                .first()
+            )
 
             if existing_ema:
                 if not existing_ema.extra_data and row.extra_data:
@@ -364,21 +376,29 @@ class DataSyncService:
         tickers_processed = 0
 
         for ticker in tickers:
-            prices = self.db.query(DailyPrice).filter(
-                DailyPrice.ticker_id == ticker.id
-            ).order_by(DailyPrice.date.asc()).all()
+            prices = (
+                self.db.query(DailyPrice)
+                .filter(DailyPrice.ticker_id == ticker.id)
+                .order_by(DailyPrice.date.asc())
+                .all()
+            )
 
             if not prices:
                 continue
 
-            df = pd.DataFrame([{
-                'date': p.date,
-                'open': p.open,
-                'high': p.high,
-                'low': p.low,
-                'close': p.close,
-                'volume': p.volume,
-            } for p in prices])
+            df = pd.DataFrame(
+                [
+                    {
+                        "date": p.date,
+                        "open": p.open,
+                        "high": p.high,
+                        "low": p.low,
+                        "close": p.close,
+                        "volume": p.volume,
+                    }
+                    for p in prices
+                ]
+            )
 
             macd_ema_added += self._save_macd_for_dataframe(
                 ticker_id=ticker.id,
@@ -408,21 +428,25 @@ class DataSyncService:
         ticker_id: int,
         indicator_type: str,
         window_period: Optional[int],
-        results: List[IndicatorResult]
+        results: List[IndicatorResult],
     ) -> int:
         """Save indicator results to database"""
         added = 0
 
         for result in results:
             # Check if indicator already exists
-            existing = self.db.query(TechnicalIndicator).filter(
-                and_(
-                    TechnicalIndicator.ticker_id == ticker_id,
-                    TechnicalIndicator.date == result.date,
-                    TechnicalIndicator.indicator_type == indicator_type,
-                    TechnicalIndicator.window_period == window_period
+            existing = (
+                self.db.query(TechnicalIndicator)
+                .filter(
+                    and_(
+                        TechnicalIndicator.ticker_id == ticker_id,
+                        TechnicalIndicator.date == result.date,
+                        TechnicalIndicator.indicator_type == indicator_type,
+                        TechnicalIndicator.window_period == window_period,
+                    )
                 )
-            ).first()
+                .first()
+            )
 
             if existing:
                 existing.value = result.value
@@ -435,7 +459,7 @@ class DataSyncService:
                     indicator_type=indicator_type,
                     window_period=window_period,
                     value=result.value,
-                    extra_data=json.dumps(result.metadata) if result.metadata else None
+                    extra_data=json.dumps(result.metadata) if result.metadata else None,
                 )
                 self.db.add(indicator)
                 added += 1

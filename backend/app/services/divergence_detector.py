@@ -71,22 +71,26 @@ class DivergenceDetectorService:
         ticker_id: int,
         limit_bars: Optional[int] = None,
     ) -> List[PriceRsiPoint]:
-        query = self.db.query(
-            DailyPrice.date.label("date"),
-            DailyPrice.low.label("low"),
-            DailyPrice.close.label("close"),
-            TechnicalIndicator.value.label("rsi"),
-        ).join(
-            TechnicalIndicator,
-            and_(
-                TechnicalIndicator.ticker_id == DailyPrice.ticker_id,
-                TechnicalIndicator.date == DailyPrice.date,
-                TechnicalIndicator.indicator_type == "rsi",
-                TechnicalIndicator.window_period == RSI_WINDOW_PERIOD,
-            ),
-        ).filter(
-            DailyPrice.ticker_id == ticker_id,
-            DailyPrice.low.isnot(None),
+        query = (
+            self.db.query(
+                DailyPrice.date.label("date"),
+                DailyPrice.low.label("low"),
+                DailyPrice.close.label("close"),
+                TechnicalIndicator.value.label("rsi"),
+            )
+            .join(
+                TechnicalIndicator,
+                and_(
+                    TechnicalIndicator.ticker_id == DailyPrice.ticker_id,
+                    TechnicalIndicator.date == DailyPrice.date,
+                    TechnicalIndicator.indicator_type == "rsi",
+                    TechnicalIndicator.window_period == RSI_WINDOW_PERIOD,
+                ),
+            )
+            .filter(
+                DailyPrice.ticker_id == ticker_id,
+                DailyPrice.low.isnot(None),
+            )
         )
 
         if limit_bars:
@@ -100,7 +104,9 @@ class DivergenceDetectorService:
             if row.low is None or row.rsi is None or row.close is None:
                 continue
             points.append(
-                PriceRsiPoint(date=row.date, low=float(row.low), close=float(row.close), rsi=float(row.rsi))
+                PriceRsiPoint(
+                    date=row.date, low=float(row.low), close=float(row.close), rsi=float(row.rsi)
+                )
             )
 
         return points
@@ -118,7 +124,7 @@ class DivergenceDetectorService:
 
         for idx in range(left_window, len(points)):
             candidate = lows[idx]
-            left_values = lows[idx - left_window:idx]
+            left_values = lows[idx - left_window : idx]
             if not all(candidate < value for value in left_values):
                 continue
 
@@ -289,7 +295,7 @@ class DivergenceDetectorService:
 
         rsi_values = [point.rsi for point in points]
         candidate = rsi_values[index]
-        left_values = rsi_values[index - left_window:index]
+        left_values = rsi_values[index - left_window : index]
 
         if not all(candidate <= value for value in left_values):
             return False
@@ -298,7 +304,7 @@ class DivergenceDetectorService:
             return True
 
         right_end = min(len(points), index + right_window + 1)
-        right_values = rsi_values[index + 1:right_end]
+        right_values = rsi_values[index + 1 : right_end]
         return all(candidate <= value for value in right_values)
 
     def _is_rsi_near_swing_low(
@@ -316,7 +322,7 @@ class DivergenceDetectorService:
 
         rsi_values = [point.rsi for point in points]
         candidate = rsi_values[index]
-        left_values = rsi_values[index - left_window:index]
+        left_values = rsi_values[index - left_window : index]
 
         # Count how many left bars are lower than candidate
         violations = sum(1 for v in left_values if v < candidate)
@@ -328,7 +334,7 @@ class DivergenceDetectorService:
             return True
 
         right_end = min(len(points), index + right_window + 1)
-        right_values = rsi_values[index + 1:right_end]
+        right_values = rsi_values[index + 1 : right_end]
         return all(candidate <= value for value in right_values)
 
     def _has_rsi_line_of_sight(
@@ -338,7 +344,9 @@ class DivergenceDetectorService:
         p2_index: int,
     ) -> bool:
         """Check RSI line-of-sight using the configured tolerance."""
-        return self._check_rsi_line_of_sight(points, p1_index, p2_index, RSI_LINE_OF_SIGHT_TOLERANCE)
+        return self._check_rsi_line_of_sight(
+            points, p1_index, p2_index, RSI_LINE_OF_SIGHT_TOLERANCE
+        )
 
     def _has_rsi_line_of_sight_emerging(
         self,
@@ -438,14 +446,14 @@ class DivergenceDetectorService:
         recent_pivots: List[Tuple[int, int]],
     ) -> List[Dict[str, object]]:
         """Detect emerging divergences with relaxed RSI swing-low rules (allows 2-3 violations).
-        
+
         Emerging signals allow p2 to be from either recent or historical pivots, with relaxed
         RSI swing-low validation to catch divergences where anchors are still forming.
         """
         events: List[Dict[str, object]] = []
         p1_near_swing_low_cache: Dict[int, bool] = {}
         strict_pairs = set()
-        
+
         EMERGING_ALLOWED_VIOLATIONS = 3
         EMERGING_LOO_TOLERANCE = 0.40  # More lenient for emerging
 
@@ -456,7 +464,9 @@ class DivergenceDetectorService:
             for p1_index in historical_pivots:
                 if p1_index >= p2_index or p2_index - p1_index > MAX_LOOKBACK_BARS:
                     continue
-                if self._is_rsi_swing_low(points, p1_index, right_window=self.config.pivot_left_window):
+                if self._is_rsi_swing_low(
+                    points, p1_index, right_window=self.config.pivot_left_window
+                ):
                     strict_pairs.add((p1_index, p2_index))
 
         # Combine recent and historical pivots for emerging p2 candidates
@@ -469,7 +479,12 @@ class DivergenceDetectorService:
 
         for p2_index, right_count in all_p2_candidates:
             # For emerging, allow more RSI violations (up to 3 in left window)
-            if not self._is_rsi_near_swing_low(points, p2_index, right_window=right_count, allowed_violations=EMERGING_ALLOWED_VIOLATIONS):
+            if not self._is_rsi_near_swing_low(
+                points,
+                p2_index,
+                right_window=right_count,
+                allowed_violations=EMERGING_ALLOWED_VIOLATIONS,
+            ):
                 continue
 
             p2 = points[p2_index]
@@ -506,7 +521,9 @@ class DivergenceDetectorService:
                     continue
 
                 # Use more lenient line-of-sight for emerging divergences
-                if not self._has_rsi_line_of_sight_emerging(points, p1_index, p2_index, EMERGING_LOO_TOLERANCE):
+                if not self._has_rsi_line_of_sight_emerging(
+                    points, p1_index, p2_index, EMERGING_LOO_TOLERANCE
+                ):
                     continue
 
                 event = self._build_emerging_event(
@@ -515,7 +532,6 @@ class DivergenceDetectorService:
                 events.append(event)
 
         return events
-
 
     def _is_event_invalidated(
         self,
@@ -556,7 +572,9 @@ class DivergenceDetectorService:
             return []
 
         pivot_candidates = self._find_pivot_candidates(points)
-        historical_pivots, aggressive_pivots, confirmed_pivots = self._classify_pivots(pivot_candidates)
+        historical_pivots, aggressive_pivots, confirmed_pivots = self._classify_pivots(
+            pivot_candidates
+        )
 
         events: List[Dict[str, object]] = []
 
@@ -590,9 +608,7 @@ class DivergenceDetectorService:
     ) -> List[Dict[str, object]]:
         cutoff_timestamp = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
         tickers = (
-            self.db.query(Ticker.id, Ticker.symbol, Ticker.name)
-            .filter(Ticker.is_active)
-            .all()
+            self.db.query(Ticker.id, Ticker.symbol, Ticker.name).filter(Ticker.is_active).all()
         )
 
         results: List[Dict[str, object]] = []
