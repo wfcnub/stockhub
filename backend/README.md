@@ -37,6 +37,29 @@ uv run mypy app indicators   # type check (informational, not yet blocking)
 From the repo root, `pre-commit install` (or `uv run --directory backend pre-commit install`)
 runs ruff on staged backend files; mypy is a manual hook: `pre-commit run mypy --hook-stage manual --all-files`.
 
+## Local test PostgreSQL (optional)
+
+The PostgreSQL integration tests skip unless a server is available. CI's PostgreSQL 18 service
+is the real gate; for local runs, `scripts/local-pg.sh` sets up a user-space PostgreSQL 18 with
+no root and no system install. It downloads Ubuntu's `postgresql-18`, `postgresql-client-18`,
+`libpq5` and `liburing2` with `apt-get download` and unpacks them with `dpkg -x` into the
+gitignored `backend/.local-pg/` (about 72 MB).
+
+```bash
+scripts/local-pg.sh setup          # once: download, initdb (scram), role stockhub_test (CREATEDB)
+LOCAL_PG=1 uv run pytest           # starts it for the session, stops it afterwards
+scripts/local-pg.sh destroy        # delete everything
+```
+
+- Other commands: `start`, `stop`, `status`, and `url`. `url` prints the connection URL,
+  which includes the password, e.g. `export TEST_DATABASE_URL=$(scripts/local-pg.sh url)`.
+- It listens on 127.0.0.1:55432 (`LOCAL_PG_PORT`) and on a socket inside the folder.
+  `LOCAL_PG_DIR` moves the folder.
+- Passwords are random and kept only in mode-600 files in the folder.
+- `TEST_DATABASE_URL` wins over `LOCAL_PG=1`. If the server was already running, pytest
+  leaves it running.
+- Each test creates and drops its own scratch database, as in CI.
+
 ## Settings
 
 `CORS_ORIGINS` accepts either a comma-separated list (`http://a,http://b`) or a JSON list.

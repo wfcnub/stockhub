@@ -4,9 +4,14 @@ Unit tests never open a DB connection: engines are lazy, so a syntactically vali
 URL pointing at a closed port is enough. Integration tests (marker `pg`) need a real
 PostgreSQL 18 server given by TEST_DATABASE_URL; each test gets its own scratch database,
 created and dropped around it, so a dev or CI database is never modified.
+
+Local opt-in: with LOCAL_PG=1 (and no TEST_DATABASE_URL), the user-space server from
+scripts/local-pg.sh is started for the session and stopped afterwards if this session
+started it. Run `scripts/local-pg.sh setup` once first. Default stays skip.
 """
 
 import os
+import subprocess
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,17 +27,41 @@ from sqlalchemy.engine import URL, make_url  # noqa: E402
 
 from app.config import _normalize_database_url  # noqa: E402
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+LOCAL_PG_SCRIPT = BACKEND_DIR / "scripts" / "local-pg.sh"
+LOCAL_PG_DIR = Path(os.environ.get("LOCAL_PG_DIR", BACKEND_DIR / ".local-pg"))
 
-def _server_url() -> URL:
+
+def _local_pg(command: str) -> str:
+    result = subprocess.run(
+        [str(LOCAL_PG_SCRIPT), command], check=True, capture_output=True, text=True
+    )
+    return result.stdout.strip()
+
+
+@pytest.fixture(scope="session")
+def pg_server_url() -> Iterator[URL]:
+    """Server URL for integration tests: TEST_DATABASE_URL, else opt-in local-pg, else skip."""
     raw = os.environ.get("TEST_DATABASE_URL")
-    if not raw:
+    if raw:
+        yield make_url(_normalize_database_url(raw))
+        return
+    if os.environ.get("LOCAL_PG") != "1":
         pytest.skip("TEST_DATABASE_URL not set: PostgreSQL integration tests skipped")
-    return make_url(_normalize_database_url(raw))
+    if not (LOCAL_PG_DIR / "data" / "PG_VERSION").exists():
+        pytest.skip("LOCAL_PG=1 but no local server; run: scripts/local-pg.sh setup")
+    started_here = _local_pg("status") != "running"
+    _local_pg("start")
+    try:
+        yield make_url(_normalize_database_url(_local_pg("url")))
+    finally:
+        if started_here:
+            _local_pg("stop")
 
 
 @pytest.fixture
-def scratch_db_url() -> Iterator[str]:
-    server = _server_url()
+def scratch_db_url(pg_server_url: URL) -> Iterator[str]:
+    server = pg_server_url
     name = f"stockhub_test_{uuid.uuid4().hex[:12]}"
     admin = create_engine(server, isolation_level="AUTOCOMMIT")
     try:
@@ -43,9 +72,6 @@ def scratch_db_url() -> Iterator[str]:
         with admin.connect() as conn:
             conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         admin.dispose()
-
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 def alembic_config(url: str):
