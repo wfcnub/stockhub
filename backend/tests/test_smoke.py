@@ -34,3 +34,16 @@ def test_available_types_is_not_shadowed_by_ticker_route() -> None:
     body = response.json()
     assert "indicator_types" in body
     assert {item["type"] for item in body["indicator_types"]} >= {"sma", "ema", "macd", "rsi", "vwap"}
+
+
+def test_health_returns_503_when_database_is_down(monkeypatch) -> None:
+    import app.main as main_module
+
+    class _BrokenEngine:
+        def connect(self):
+            raise ConnectionError("db down")
+
+    monkeypatch.setattr(main_module, "engine", _BrokenEngine())
+    response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json() == {"status": "unhealthy", "detail": "database unavailable"}

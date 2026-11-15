@@ -1,9 +1,16 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app import __version__
 from app.config import settings
+from app.db.database import engine
 from app.routers import tickers, prices, indicators, sync, stats, indexes, divergences, triangles
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="StockHub API",
@@ -36,5 +43,19 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+def health():
+    """Liveness + DB check for the container healthcheck and monitoring.
+
+    200 {"status": "healthy"} only when the database answers; otherwise 503.
+    Sync def on purpose: FastAPI runs it in the threadpool, so a slow DB never blocks the loop.
+    """
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Health check: database unavailable")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "detail": "database unavailable"},
+        )
     return {"status": "healthy"}
