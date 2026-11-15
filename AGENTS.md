@@ -44,6 +44,7 @@ This file briefs coding agents working in this repository.
   - `cd backend && uv run ruff check . && uv run ruff format --check .`
   - `cd backend && uv run pytest`
   - `cd backend && uv run mypy app` (informational until the models move to `Mapped[]`)
+  - Indicator golden tests (`tests/test_indicator_golden.py`) compare against committed TA-Lib vectors, a plain-Python reference and hand-computed cases. Regenerate the fixture only after a deliberate TA-Lib upgrade: `cd backend && uv run python -m tests.fixtures.generate_indicator_golden`. After an indicator fix is deployed, recompute stored values with `uv run python -m app.sync run --index JCI --full`.
   - Add or change dependencies with `uv add` / `uv add --dev`, never by hand-editing `uv.lock`.
   - Schema changes: edit the models, `uv run alembic revision --autogenerate -m "..."`, review it, update `DB_DESIGN.md`. PostgreSQL tests run when `TEST_DATABASE_URL` points at a PostgreSQL 18 server whose role has CREATEDB.
 - Data sync (separate worker process; the API never runs syncs itself):
