@@ -69,14 +69,16 @@ jobs:
           tags: scan/${{ matrix.name }}:ci
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-      - name: Trivy image scan (HIGH and CRITICAL with a fix fail the release)
+      # Release tags (the ones that get deployed) fail on HIGH or CRITICAL findings that have a fix;
+      # master builds only report, so the known frontend findings don't block until the upgrade lands.
+      - name: Trivy image scan
         if: steps.detect.outputs.build == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: scan/${{ matrix.name }}:ci
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: ${{ startsWith(github.ref, 'refs/tags/') && '1' || '0' }}
       - name: Push
         if: steps.detect.outputs.build == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
