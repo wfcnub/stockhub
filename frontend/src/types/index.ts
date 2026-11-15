@@ -1,10 +1,11 @@
-// API Contract v1.0.5 Types
+// API Contract v1.1.0 Types
 
 // ============ Platform Statistics ============
 
 export interface IndexInfo {
   code: string;
   name: string;
+  yfinance_suffix?: string | null;
   ticker_count: number;
   last_sync: string;
 }
@@ -131,6 +132,8 @@ export interface TickerDetails {
   symbol: string;
   name: string;
   sector: string | null;
+  industry?: string | null;
+  index?: string | null;
   key_metrics: KeyMetrics | null;
 }
 
@@ -193,15 +196,47 @@ export interface ChartQueryParams {
 
 // ============ Screener ============
 
-export interface ScreenerResult {
+export interface ScreenerQueryParams {
+  preset?: string;
+  min_price?: number;
+  max_price?: number;
+  min_volume?: number;
+  sector?: string;
+  min_pe?: number;
+  max_pe?: number;
+  min_market_cap?: number;
+  max_market_cap?: number;
+  limit?: number; // 1-500, default 50
+}
+
+// Preset mode (e.g. preset=bullish_divergence)
+export interface ScreenerPresetResult {
   symbol: string;
   name: string;
 }
 
-export interface ScreenerResponse {
+export interface ScreenerPresetResponse {
   preset: string;
-  results: ScreenerResult[];
+  results: ScreenerPresetResult[];
 }
+
+// Custom filter mode
+export interface ScreenerCustomResult {
+  symbol: string;
+  name: string;
+  sector: string | null;
+  latest_close: number | null;
+  latest_volume: number | null;
+}
+
+export interface ScreenerCustomResponse {
+  total: number;
+  results: ScreenerCustomResult[];
+}
+
+export type ScreenerResponse = ScreenerPresetResponse | ScreenerCustomResponse;
+
+export type ScreenerResult = ScreenerPresetResult;
 
 // ============ Divergence Detection ============
 
@@ -238,6 +273,16 @@ export interface TickerDivergencesResponse {
   symbol: string;
   include_invalidated?: boolean;
   events: DivergenceEvent[];
+}
+
+export interface DivergenceConfigParams {
+  pivot_left_window?: number;
+  confirmed_right_min?: number;
+  confirmed_right_max?: number;
+  aggressive_right_min?: number;
+  aggressive_right_max?: number;
+  include_invalidated?: boolean;
+  limit?: number;
 }
 
 export interface DivergenceScreenerItem extends DivergenceEvent {
