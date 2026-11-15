@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import __version__
 from app.config import settings
 from app.routers import tickers, prices, indicators, sync, stats, indexes, divergences, triangles
 
 app = FastAPI(
     title="StockHub API",
     description="API for stock data management and technical analysis",
-    version="0.2.0",
+    version=__version__,
 )
 
 app.add_middleware(
@@ -31,7 +32,7 @@ app.include_router(sync.router, prefix="/api/v1", tags=["sync"])
 
 @app.get("/")
 async def root():
-    return {"message": "StockHub API", "version": "0.2.0"}
+    return {"message": "StockHub API", "version": __version__}
 
 
 @app.get("/health")
