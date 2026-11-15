@@ -4,7 +4,7 @@ StockHub is a stock analysis platform with historical price data, technical indi
 
 ## Tech Stack
 
-- **Backend**: FastAPI (Python 3.11+)
+- **Backend**: FastAPI (Python 3.14, managed with uv)
 - **Frontend**: Next.js 14 (TypeScript)
 - **Database**: PostgreSQL (production) / SQLite (local dev)
 - **Charts**: Lightweight Charts
@@ -25,7 +25,7 @@ stockhub/
 │   │   └── tools/             # Data source and ticker list fetchers
 │   ├── indicators/            # Technical indicator library
 │   ├── pyproject.toml
-│   └── requirements.txt
+│   └── uv.lock
 ├── frontend/                  # Next.js frontend
 │   ├── src/
 │   │   ├── app/              # App Router pages
@@ -43,7 +43,7 @@ stockhub/
 
 ## Prerequisites
 
-- **Python 3.11+** - [Download Python](https://www.python.org/downloads/)
+- **uv** - [Install uv](https://docs.astral.sh/uv/getting-started/installation/) (it installs Python 3.14 if needed)
 - **Node.js 18+** - [Download Node.js](https://nodejs.org/)
 - **Docker** (optional, PostgreSQL local dev) - [Download Docker](https://www.docker.com/)
 
@@ -80,10 +80,8 @@ Or use SQLite locally without Docker.
 
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uv sync
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
 #### 3. Frontend

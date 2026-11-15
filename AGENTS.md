@@ -36,8 +36,14 @@ This file briefs coding agents working in this repository.
 - Full stack local run:
   - `./start.sh`
   - `./stop.sh`
-- Backend local:
-  - `cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000`
+- Backend local (Python 3.14, managed by uv; dependencies in `backend/pyproject.toml` and `backend/uv.lock`):
+  - `cd backend && uv sync`
+  - `cd backend && uv run uvicorn app.main:app --reload --port 8000`
+- Backend quality gates (CI runs the same):
+  - `cd backend && uv run ruff check . && uv run ruff format --check .`
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run mypy app` (informational until the models move to `Mapped[]`)
+  - Add or change dependencies with `uv add` / `uv add --dev`, never by hand-editing `uv.lock`.
 - Frontend local:
   - `cd frontend && npm run dev`
 - Frontend quality gates:
