@@ -9,6 +9,45 @@ from app.models.ticker import Ticker
 router = APIRouter(prefix="/indicators", tags=["indicators"])
 
 
+# Static paths must be registered before "/{ticker_symbol}", which would otherwise capture them.
+@router.get("/available-types")
+def get_available_indicator_types():
+    """List all available indicator types that can be computed"""
+    return {
+        "indicator_types": [
+            {
+                "type": "sma",
+                "name": "Simple Moving Average",
+                "default_periods": [5, 10, 15, 20, 50, 100, 200]
+            },
+            {
+                "type": "ema",
+                "name": "Exponential Moving Average",
+                "default_periods": [5, 10, 15, 20, 50, 100, 200]
+            },
+            {
+                "type": "macd",
+                "name": "MACD (Moving Average Convergence Divergence)",
+                "default_periods": [9],  # Signal line period
+                "params": {"fast": 12, "slow": 26},
+                "modes": ["sma", "ema"],
+                "default_mode": "sma",
+                "storage_types": ["macd_sma", "macd_ema"],
+            },
+            {
+                "type": "rsi",
+                "name": "Relative Strength Index",
+                "default_periods": [14]
+            },
+            {
+                "type": "vwap",
+                "name": "Volume Weighted Average Price",
+                "default_periods": None  # Daily calculation
+            }
+        ]
+    }
+
+
 @router.get("/{ticker_symbol}")
 def get_indicators(
     ticker_symbol: str,
@@ -107,43 +146,5 @@ def get_latest_indicators(
                 "extra_data": ind.extra_data
             }
             for ind in indicators
-        ]
-    }
-
-
-@router.get("/available-types")
-def get_available_indicator_types():
-    """List all available indicator types that can be computed"""
-    return {
-        "indicator_types": [
-            {
-                "type": "sma",
-                "name": "Simple Moving Average",
-                "default_periods": [5, 10, 15, 20, 50, 100, 200]
-            },
-            {
-                "type": "ema",
-                "name": "Exponential Moving Average",
-                "default_periods": [5, 10, 15, 20, 50, 100, 200]
-            },
-            {
-                "type": "macd",
-                "name": "MACD (Moving Average Convergence Divergence)",
-                "default_periods": [9],  # Signal line period
-                "params": {"fast": 12, "slow": 26},
-                "modes": ["sma", "ema"],
-                "default_mode": "sma",
-                "storage_types": ["macd_sma", "macd_ema"],
-            },
-            {
-                "type": "rsi",
-                "name": "Relative Strength Index",
-                "default_periods": [14]
-            },
-            {
-                "type": "vwap",
-                "name": "Volume Weighted Average Price",
-                "default_periods": None  # Daily calculation
-            }
         ]
     }
