@@ -18,6 +18,9 @@ out/
 /frontend/build/
 /frontend/dist/
 
+# TypeScript incremental build info
+*.tsbuildinfo
+
 # Testing
 coverage/
 
