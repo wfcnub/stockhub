@@ -232,10 +232,7 @@ export async function getTickerTriangles(
 }
 
 /** `days` is the lookback window (contract: 1-30, default 7). */
-export function getTriangleScreener(
-  days = 7,
-  params: TriangleConfigParams = {},
-): Promise<TriangleScreenerResponse> {
+export function getTriangleScreener(days = 7, params: TriangleConfigParams = {}): Promise<TriangleScreenerResponse> {
   const { triangle_types, ...rest } = params;
   return request(
     client.get<TriangleScreenerResponse>('/screener/triangles', {

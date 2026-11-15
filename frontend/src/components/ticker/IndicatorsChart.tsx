@@ -189,9 +189,10 @@ export function MACDChart({ data, height = 150, mode = 'sma' }: MACDChartProps) 
       .map((d) => ({
         time: d.date as string,
         value: (d.indicators.macd as { value: number; signal: number; histogram: number }).histogram,
-        color: (d.indicators.macd as { value: number; signal: number; histogram: number }).histogram >= 0
-          ? themeColors.volumeUp
-          : themeColors.volumeDown,
+        color:
+          (d.indicators.macd as { value: number; signal: number; histogram: number }).histogram >= 0
+            ? themeColors.volumeUp
+            : themeColors.volumeDown,
       }));
 
     macdLine.setData(macdData);

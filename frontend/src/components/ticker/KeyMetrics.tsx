@@ -11,7 +11,7 @@ interface KeyMetricsProps {
 
 function formatNumber(value: number | null | undefined, prefix = '', suffix = ''): string {
   if (value === null || value === undefined) return '-';
-  
+
   // Format large numbers (market cap)
   if (Math.abs(value) >= 1e12) {
     return `${prefix}${(value / 1e12).toFixed(2)}T${suffix}`;
@@ -22,7 +22,7 @@ function formatNumber(value: number | null | undefined, prefix = '', suffix = ''
   if (Math.abs(value) >= 1e6) {
     return `${prefix}${(value / 1e6).toFixed(2)}M${suffix}`;
   }
-  
+
   return `${prefix}${value.toLocaleString('en-US', { maximumFractionDigits: 2 })}${suffix}`;
 }
 
@@ -79,7 +79,8 @@ export function KeyMetrics({ symbol, name, sector, metrics }: KeyMetricsProps) {
 
       {metrics?.observation_date && (
         <p className="mb-4 text-xs text-gemini-text-tertiary">
-          Data as of {new Date(metrics.observation_date).toLocaleDateString('en-US', {
+          Data as of{' '}
+          {new Date(metrics.observation_date).toLocaleDateString('en-US', {
             year: 'numeric',
             month: 'long',
             day: 'numeric',

@@ -59,22 +59,14 @@ export default function ScreenerResults({ results, isLoading }: ScreenerResultsP
 
   return (
     <div className="bg-white rounded-lg shadow-md p-4">
-      <h3 className="text-lg font-semibold mb-4">
-        Screening Results ({results.length} stocks found)
-      </h3>
+      <h3 className="text-lg font-semibold mb-4">Screening Results ({results.length} stocks found)</h3>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Symbol
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Name
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Close
-              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Symbol</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Close</th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Change %
               </th>
@@ -91,16 +83,17 @@ export default function ScreenerResults({ results, isLoading }: ScreenerResultsP
                     {row.symbol}
                   </a>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                  {row.name}
-                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.name}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
                   {formatNumber(row.close)}
                 </td>
-                <td className={`px-4 py-3 whitespace-nowrap text-sm text-right font-medium ${
-                  row.change_percent >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {row.change_percent >= 0 ? '+' : ''}{formatNumber(row.change_percent)}%
+                <td
+                  className={`px-4 py-3 whitespace-nowrap text-sm text-right font-medium ${
+                    row.change_percent >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {row.change_percent >= 0 ? '+' : ''}
+                  {formatNumber(row.change_percent)}%
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-right">
                   {formatVolume(row.volume)}

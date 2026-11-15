@@ -16,7 +16,7 @@ type SortOrder = 'asc' | 'desc';
 function TickersContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  
+
   const initialSearch = searchParams.get('search') || '';
   const initialIndex = searchParams.get('index') || '';
   const initialPageSizeValue = Number(searchParams.get('page_size'));
@@ -24,12 +24,10 @@ function TickersContent() {
     ? initialPageSizeValue
     : DEFAULT_ITEMS_PER_PAGE;
   const initialPageValue = Number(searchParams.get('page'));
-  const initialPage = Number.isInteger(initialPageValue) && initialPageValue > 0
-    ? initialPageValue - 1
-    : 0;
+  const initialPage = Number.isInteger(initialPageValue) && initialPageValue > 0 ? initialPageValue - 1 : 0;
   const initialSortBy: SortField = searchParams.get('sort_by') === 'name' ? 'name' : 'symbol';
   const initialSortOrder: SortOrder = searchParams.get('sort_order') === 'desc' ? 'desc' : 'asc';
-  
+
   const [tickers, setTickers] = useState<TickerListItem[]>([]);
   const [indexes, setIndexes] = useState<Index[]>([]);
   const [total, setTotal] = useState(0);
@@ -46,7 +44,7 @@ function TickersContent() {
   const fetchTickers = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const response = await getTickers({
         offset: page * itemsPerPage,
@@ -56,7 +54,7 @@ function TickersContent() {
         sort_by: sortBy,
         sort_order: sortOrder,
       });
-      
+
       setTickers(response.data);
       setTotal(response.total);
     } catch (err) {
@@ -125,9 +123,7 @@ function TickersContent() {
   };
 
   const handleItemsPerPageChange = (value: number) => {
-    const nextItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === value)
-      ? value
-      : DEFAULT_ITEMS_PER_PAGE;
+    const nextItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === value) ? value : DEFAULT_ITEMS_PER_PAGE;
 
     setItemsPerPage(nextItemsPerPage);
     setPage(0);
@@ -283,8 +279,12 @@ function TickersContent() {
                             <span className="font-semibold text-gemini-accent-blue">{ticker.symbol}</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-gemini-text-primary">{ticker.name}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-gemini-text-secondary">{ticker.sector || '-'}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-gemini-text-secondary">{ticker.industry || '-'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-gemini-text-secondary">
+                            {ticker.sector || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-gemini-text-secondary">
+                            {ticker.industry || '-'}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="gemini-badge">{ticker.index}</span>
                           </td>

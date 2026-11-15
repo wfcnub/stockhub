@@ -12,12 +12,7 @@ interface IndicatorChartProps {
   title?: string;
 }
 
-export default function IndicatorChart({
-  data,
-  color,
-  height = 150,
-  title
-}: IndicatorChartProps) {
+export default function IndicatorChart({ data, color, height = 150, title }: IndicatorChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Line'> | null>(null);
@@ -74,9 +69,7 @@ export default function IndicatorChart({
 
   return (
     <div className="w-full">
-      {title && (
-        <div className="mb-1 text-sm text-gemini-text-secondary">{title}</div>
-      )}
+      {title && <div className="mb-1 text-sm text-gemini-text-secondary">{title}</div>}
       <div ref={chartContainerRef} className="w-full" />
     </div>
   );

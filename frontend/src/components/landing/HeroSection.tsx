@@ -59,20 +59,35 @@ export function HeroSection() {
 
           {error ? (
             <div className="mt-3 inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1 text-xs font-medium text-gemini-accent-red">
-              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                className="h-3.5 w-3.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
-              <span className="truncate" title={error}>Failed to refresh stats</span>
+              <span className="truncate" title={error}>
+                Failed to refresh stats
+              </span>
             </div>
           ) : null}
         </div>
         <span
-          className={error
-            ? 'inline-flex items-center rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1.5 text-xs font-medium text-gemini-accent-red'
-            : 'hud-pill'}
+          className={
+            error
+              ? 'inline-flex items-center rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1.5 text-xs font-medium text-gemini-accent-red'
+              : 'hud-pill'
+          }
           title={error || undefined}
         >
-          Last sync: {error ? 'Failed' : (stats?.last_global_sync ? formatDate(stats.last_global_sync) : '—')}
+          Last sync: {error ? 'Failed' : stats?.last_global_sync ? formatDate(stats.last_global_sync) : '—'}
         </span>
       </div>
 
@@ -80,9 +95,23 @@ export function HeroSection() {
         <div className="hud-subpanel p-4">
           <p className="text-sm text-gemini-text-secondary">Indexes</p>
           {error ? (
-            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-2.5 py-1 text-xs font-semibold text-gemini-accent-red" title={error}>
-              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div
+              className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-2.5 py-1 text-xs font-semibold text-gemini-accent-red"
+              title={error}
+            >
+              <svg
+                className="h-3.5 w-3.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
               <span className="truncate">Failed to load</span>
             </div>
@@ -90,18 +119,34 @@ export function HeroSection() {
             <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">{stats?.total_indexes ?? '—'}</p>
           )}
         </div>
-        
+
         <div className="hud-subpanel p-4">
           <p className="text-sm text-gemini-text-secondary">Tickers</p>
           {error ? (
-            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-2.5 py-1 text-xs font-semibold text-gemini-accent-red" title={error}>
-              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div
+              className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-2.5 py-1 text-xs font-semibold text-gemini-accent-red"
+              title={error}
+            >
+              <svg
+                className="h-3.5 w-3.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
               <span className="truncate">Failed to load</span>
             </div>
           ) : (
-            <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">{stats?.total_tickers?.toLocaleString() ?? '—'}</p>
+            <p className="mt-2 text-3xl font-semibold text-gemini-text-primary">
+              {stats?.total_tickers?.toLocaleString() ?? '—'}
+            </p>
           )}
         </div>
       </div>
@@ -110,10 +155,23 @@ export function HeroSection() {
         <div className="mt-5 border-t border-gemini-surface-border pt-5">
           <p className="mb-3 text-sm text-gemini-text-secondary">Tracked indexes</p>
           <div className="inline-flex max-w-full items-center gap-2 rounded-gemini border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-2 text-sm text-gemini-accent-red">
-            <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              className="h-4 w-4 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
-            <span className="truncate" title={error}>Unable to load index details</span>
+            <span className="truncate" title={error}>
+              Unable to load index details
+            </span>
           </div>
         </div>
       ) : stats?.indexes && stats.indexes.length > 0 ? (
