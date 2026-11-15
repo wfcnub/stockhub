@@ -1,6 +1,6 @@
-# StockHub Database Design (v1.1.0)
+# StockHub Database Design (v1.2.0)
 
-> **Source of Truth** - This document defines the database schema. PostgreSQL is the recommended engine to leverage time-series performance and JSONB support for error logging.
+> **Source of Truth** - This document defines the database schema. The engine is **PostgreSQL 18 only** (SQLite is no longer supported). The schema is created and changed **only through Alembic migrations** in `backend/migrations/` (`uv run alembic upgrade head`); the SQLAlchemy models in `backend/app/models/` must match the latest revision, which `alembic check` verifies in the tests.
 
 ---
 
@@ -95,6 +95,8 @@ FK = Foreign Key    PK = Primary Key
 
 ## Tables
 
+Conventions (from the models' naming convention): `pk_<table>`, `uq_<table>_<cols>`, `fk_<table>_<col>_<ref>`, `ck_<table>_<name>`, `ix_<table>_<cols>`. Every timestamp is `TIMESTAMPTZ`. Float columns are `DOUBLE PRECISION`. All child rows are removed by `ON DELETE CASCADE` when their ticker or index is hard-deleted.
+
 ### 1. indexes
 Stores market index metadata and global sync timestamps.
 
@@ -103,11 +105,11 @@ Stores market index metadata and global sync timestamps.
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
 | code | VARCHAR(20) | UNIQUE, NOT NULL | e.g., "JCI" |
 | name | VARCHAR(255) | NOT NULL | Full index name |
-| yfinance_suffix | VARCHAR(10) | DEFAULT '' | Yahoo Finance suffix (e.g., ".JK" for IDX) |
-| ticker_count | INTEGER | DEFAULT 0 | Number of tickers in index |
-| is_active | BOOLEAN | DEFAULT true | Soft delete flag |
-| last_synced_at | TIMESTAMP | NULL | Used for Hero section stats |
-| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
+| yfinance_suffix | VARCHAR(10) | NOT NULL, DEFAULT '' | Yahoo Finance suffix (e.g., ".JK" for IDX) |
+| ticker_count | INTEGER | NOT NULL, DEFAULT 0 | Number of tickers in index |
+| is_active | BOOLEAN | NOT NULL, DEFAULT true | Soft delete flag |
+| last_synced_at | TIMESTAMPTZ | NULL | Used for Hero section stats |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Record creation time |
 
 ---
 
@@ -119,11 +121,11 @@ Basic information for each listed company.
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
 | symbol | VARCHAR(20) | UNIQUE, NOT NULL | e.g., "BBCA" |
 | name | VARCHAR(255) | NULL | Company name |
-| index_id | INTEGER | REFERENCES indexes(id), NOT NULL | Foreign key |
-| sector | VARCHAR(100) | | Business category |
-| industry | VARCHAR(100) | | Industry classification |
-| is_active | BOOLEAN | DEFAULT true | Soft delete flag |
-| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
+| index_id | INTEGER | NOT NULL, REFERENCES indexes(id) ON DELETE CASCADE | Indexed (`ix_tickers_index_id`) |
+| sector | VARCHAR(100) | NULL | Business category |
+| industry | VARCHAR(100) | NULL | Industry classification |
+| is_active | BOOLEAN | NOT NULL, DEFAULT true | Soft delete flag |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Record creation time |
 
 ---
 
@@ -132,18 +134,18 @@ Historical OHLCV data with full price details.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| id | SERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
-| date | DATE | NOT NULL | Trading day |
-| open | FLOAT | NULL | Opening price |
-| high | FLOAT | NULL | Daily high |
-| low | FLOAT | NULL | Daily low |
-| close | FLOAT | NOT NULL | Closing price |
+| id | BIGSERIAL | PRIMARY KEY | 64-bit, because `ON CONFLICT` upserts consume sequence values |
+| ticker_id | INTEGER | NOT NULL, REFERENCES tickers(id) ON DELETE CASCADE | Foreign key |
+| date | DATE | NOT NULL | Trading day (indexed, `ix_prices_date`) |
+| open | DOUBLE PRECISION | NULL | Opening price |
+| high | DOUBLE PRECISION | NULL | Daily high |
+| low | DOUBLE PRECISION | NULL | Daily low |
+| close | DOUBLE PRECISION | NOT NULL | Closing price |
 | volume | BIGINT | NULL | Units traded |
-| adj_close | FLOAT | NULL | Adjusted closing price |
-| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
+| adj_close | DOUBLE PRECISION | NULL | Adjusted closing price |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Record creation time |
 
-**Constraint:** `UNIQUE (ticker_id, date)` — ensures one price record per ticker per day.
+**Natural key:** `uq_prices_ticker_id_date UNIQUE (ticker_id, date)`: one price record per ticker per day. It also serves `(ticker_id, date)` range lookups.
 
 ---
 
@@ -153,19 +155,19 @@ Historical fundamental data for valuation tracking.
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | id | BIGSERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
+| ticker_id | INTEGER | NOT NULL, REFERENCES tickers(id) ON DELETE CASCADE | Foreign key |
 | observation_date | DATE | NOT NULL | Date metric was recorded |
-| market_cap | BIGINT | | Valuation on that date |
-| pe_ratio | FLOAT | | Price-to-earnings ratio |
-| pbv | FLOAT | | Price-to-book value |
-| dividend_yield | FLOAT | | Dividend yield percentage |
-| eps | FLOAT | | Earnings per share |
-| roe | FLOAT | | Return on equity |
-| fiscal_year | INTEGER | | e.g., 2026 |
-| fiscal_quarter | INTEGER | | Q1, Q2, Q3, Q4 |
-| last_updated | TIMESTAMP | DEFAULT NOW() | Record update time |
+| market_cap | BIGINT | NULL | Valuation on that date |
+| pe_ratio | DOUBLE PRECISION | NULL | Price-to-earnings ratio |
+| pbv | DOUBLE PRECISION | NULL | Price-to-book value |
+| dividend_yield | DOUBLE PRECISION | NULL | Dividend yield percentage |
+| eps | DOUBLE PRECISION | NULL | Earnings per share |
+| roe | DOUBLE PRECISION | NULL | Return on equity |
+| fiscal_year | INTEGER | NULL | e.g., 2026 |
+| fiscal_quarter | INTEGER | NULL | 1-4 |
+| last_updated | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Record update time |
 
-**Constraint:** `UNIQUE (ticker_id, observation_date)` — ensures one metrics snapshot per ticker per observation date.
+**Natural key:** `uq_key_metrics_ticker_id_observation_date UNIQUE (ticker_id, observation_date)`.
 
 ---
 
@@ -174,16 +176,16 @@ Stores technical indicator values used by chart overlays and momentum panels.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| id | SERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | REFERENCES tickers(id), NOT NULL | Foreign key |
+| id | BIGSERIAL | PRIMARY KEY | 64-bit, because `ON CONFLICT` upserts consume sequence values |
+| ticker_id | INTEGER | NOT NULL, REFERENCES tickers(id) ON DELETE CASCADE | Foreign key |
 | date | DATE | NOT NULL | Trading day |
 | indicator_type | VARCHAR(30) | NOT NULL | e.g., sma, ema, rsi, macd_sma, macd_ema (legacy rows may use macd) |
-| window_period | INTEGER | NULL | For windowed indicators (e.g., SMA 20, RSI 14) |
-| value | FLOAT | NOT NULL | Main indicator value |
+| window_period | INTEGER | NULL | For windowed indicators (e.g., SMA 20, RSI 14); NULL for MACD |
+| value | DOUBLE PRECISION | NOT NULL | Main indicator value |
 | extra_data | VARCHAR(500) | NULL | JSON string for extra values (e.g., MACD signal/histogram/ma_type) |
-| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Record creation time |
 
-**Composite Index:** `ix_ticker_indicator_date (ticker_id, indicator_type, date)` for fast chart queries.
+**Natural key:** `uq_technical_indicators_natural_key UNIQUE NULLS NOT DISTINCT (ticker_id, indicator_type, window_period, date)`. One value per indicator, window and day; `NULLS NOT DISTINCT` makes rows with a NULL `window_period` (MACD) unique too. It replaces the old `ix_ticker_indicator_date` index and lets the sync use `INSERT ... ON CONFLICT` instead of per-row lookups.
 
 **MACD storage conventions:**
 - `macd_sma`: MACD values computed with SMA-based lines/signals.
@@ -198,13 +200,13 @@ Tracks last per-ticker synchronization health/state.
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
-| ticker_id | INTEGER | UNIQUE, REFERENCES tickers(id), NOT NULL | One row per ticker |
+| ticker_id | INTEGER | UNIQUE, NOT NULL, REFERENCES tickers(id) ON DELETE CASCADE | One row per ticker |
 | last_sync_date | DATE | NULL | Last date of price data synced |
-| last_sync_timestamp | TIMESTAMP | NULL | Last sync attempt timestamp |
-| status | VARCHAR(20) | DEFAULT 'pending' | `pending`, `syncing`, `completed`, `error` |
+| last_sync_timestamp | TIMESTAMPTZ | NULL | Last sync attempt timestamp |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'pending', CHECK | `pending`, `syncing`, `completed`, `error` (`ck_sync_status_status_valid`) |
 | error_message | VARCHAR(500) | NULL | Last sync error message |
-| created_at | TIMESTAMP | DEFAULT NOW() | Record creation time |
-| updated_at | TIMESTAMP | NULL | Last update timestamp |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Record creation time |
+| updated_at | TIMESTAMPTZ | NULL | Last update timestamp |
 
 ---
 
@@ -215,132 +217,158 @@ Tracks batch operations for the landing page progress UI.
 |--------|------|-------------|-------------|
 | id | SERIAL | PRIMARY KEY | Auto-generated ID |
 | sync_id | VARCHAR(100) | UNIQUE, NOT NULL | Unique job identifier |
-| index_id | INTEGER | REFERENCES indexes(id), NOT NULL | Foreign key to index |
-| status | VARCHAR(20) | NOT NULL | pending, in_progress, running (legacy), completed, failed, cancelled |
-| total_tickers | INTEGER | DEFAULT 0 | Total tickers in batch |
-| processed_tickers | INTEGER | DEFAULT 0 | Count for progress bar |
-| current_ticker | VARCHAR(20) | | Currently processing ticker |
-| started_at | TIMESTAMP | DEFAULT NOW() | Job start time |
-| completed_at | TIMESTAMP | | Job completion time |
+| index_id | INTEGER | NOT NULL, REFERENCES indexes(id) ON DELETE CASCADE | Indexed (`ix_sync_jobs_index_id`) |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'pending', CHECK | pending, in_progress, running (legacy), completed, failed, cancelled (`ck_sync_jobs_status_valid`; indexed, `ix_sync_jobs_status`) |
+| total_tickers | INTEGER | NOT NULL, DEFAULT 0 | Total tickers in batch |
+| processed_tickers | INTEGER | NOT NULL, DEFAULT 0 | Count for progress bar |
+| current_ticker | VARCHAR(20) | NULL | Currently processing ticker |
+| started_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Job start time |
+| completed_at | TIMESTAMPTZ | NULL | Job completion time |
 | error_message | VARCHAR(500) | NULL | Error details if job fails/stops |
 
 **Status compatibility note:** runtime rows may still contain legacy `running`; API responses normalize that value to `in_progress`.
 
 ---
 
+## Migrations
+
+- Tool: Alembic, configured in `backend/alembic.ini` and `backend/migrations/env.py`. The URL comes from `DATABASE_URL`, which must be PostgreSQL.
+- `0001_baseline` creates the schema below on an empty database. There is no upgrade path from pre-1.2.0 databases: StockHub starts fresh, and data is re-synced.
+- Apply: `cd backend && uv run alembic upgrade head`. Deployments run this before the API starts.
+- Change the schema: edit the models, `uv run alembic revision --autogenerate -m "..."`, review the generated file, and update this document. Revisions must be reversible (`downgrade`), and backward-compatible with the previous release, because a deploy rollback restores images, not the schema.
+- Tests (`backend/tests/test_migrations.py`, PostgreSQL via `TEST_DATABASE_URL`) run upgrade → downgrade → upgrade, check that `alembic check` finds no difference between the models and the migrations, and check the constraints.
+
+---
+
 ## Performance Strategy
 
 * **Partitioning**: For `prices`, `key_metrics`, and `technical_indicators`, consider partitioning by date as the dataset grows.
-* **Indexing**: 
-    * `idx_prices_ticker_date`: (ticker_id, date DESC) — optimize price lookups
-    * `idx_metrics_ticker_date`: (ticker_id, observation_date DESC) — optimize metrics lookups
-    * `ix_ticker_indicator_date`: (ticker_id, indicator_type, date) — optimize indicator lookups for chart API
-    * `idx_sync_jobs_status`: (status) — optimize job queue queries
+* **Indexing**:
+    * `uq_prices_ticker_id_date`, `uq_key_metrics_ticker_id_observation_date`, `uq_technical_indicators_natural_key`: the natural keys also serve per-ticker range lookups (they replace the former `idx_prices_ticker_date`, `idx_metrics_ticker_date` and `ix_ticker_indicator_date`).
+    * `ix_prices_date`: cross-ticker queries by date (screeners, latest bar).
+    * `ix_sync_jobs_status`, `ix_sync_jobs_index_id`, `ix_tickers_index_id`: job queue and foreign-key lookups and cascades.
 
 ---
 
 ## SQL Schema
 
+Generated from Alembic revision `0001_baseline` (`uv run alembic upgrade head --sql`, without the `alembic_version` table).
+
 ```sql
--- 1. Indexes (Stores global sync metadata)
 CREATE TABLE indexes (
-    id SERIAL PRIMARY KEY,
-    code VARCHAR(20) UNIQUE NOT NULL,
+    id SERIAL NOT NULL,
+    code VARCHAR(20) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    yfinance_suffix VARCHAR(10) DEFAULT '',
-    ticker_count INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    last_synced_at TIMESTAMP NULL,
-    created_at TIMESTAMP DEFAULT NOW()
+    yfinance_suffix VARCHAR(10) DEFAULT '' NOT NULL,
+    ticker_count INTEGER DEFAULT 0 NOT NULL,
+    is_active BOOLEAN DEFAULT true NOT NULL,
+    last_synced_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT pk_indexes PRIMARY KEY (id),
+    CONSTRAINT uq_indexes_code UNIQUE (code)
 );
 
--- 2. Tickers (Company metadata)
 CREATE TABLE tickers (
-    id SERIAL PRIMARY KEY,
-    symbol VARCHAR(20) UNIQUE NOT NULL,
+    id SERIAL NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
     name VARCHAR(255),
-    index_id INTEGER NOT NULL REFERENCES indexes(id),
+    index_id INTEGER NOT NULL,
     sector VARCHAR(100),
     industry VARCHAR(100),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW()
+    is_active BOOLEAN DEFAULT true NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT pk_tickers PRIMARY KEY (id),
+    CONSTRAINT fk_tickers_index_id_indexes FOREIGN KEY(index_id) REFERENCES indexes (id) ON DELETE CASCADE,
+    CONSTRAINT uq_tickers_symbol UNIQUE (symbol)
 );
 
--- 3. Prices (Core Time-Series data for charts)
+CREATE INDEX ix_tickers_index_id ON tickers (index_id);
+
+CREATE TABLE sync_jobs (
+    id SERIAL NOT NULL,
+    sync_id VARCHAR(100) NOT NULL,
+    index_id INTEGER NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending' NOT NULL,
+    total_tickers INTEGER DEFAULT 0 NOT NULL,
+    processed_tickers INTEGER DEFAULT 0 NOT NULL,
+    current_ticker VARCHAR(20),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    error_message VARCHAR(500),
+    CONSTRAINT pk_sync_jobs PRIMARY KEY (id),
+    CONSTRAINT ck_sync_jobs_status_valid CHECK (status IN ('pending', 'in_progress', 'running', 'completed', 'failed', 'cancelled')),
+    CONSTRAINT fk_sync_jobs_index_id_indexes FOREIGN KEY(index_id) REFERENCES indexes (id) ON DELETE CASCADE,
+    CONSTRAINT uq_sync_jobs_sync_id UNIQUE (sync_id)
+);
+
+CREATE INDEX ix_sync_jobs_index_id ON sync_jobs (index_id);
+
+CREATE INDEX ix_sync_jobs_status ON sync_jobs (status);
+
 CREATE TABLE prices (
-    id SERIAL PRIMARY KEY,
-    ticker_id INTEGER NOT NULL REFERENCES tickers(id),
+    id BIGSERIAL NOT NULL,
+    ticker_id INTEGER NOT NULL,
     date DATE NOT NULL,
-    open FLOAT,
-    high FLOAT,
-    low FLOAT,
-    close FLOAT NOT NULL,
+    open DOUBLE PRECISION,
+    high DOUBLE PRECISION,
+    low DOUBLE PRECISION,
+    close DOUBLE PRECISION NOT NULL,
     volume BIGINT,
-    adj_close FLOAT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE (ticker_id, date)
+    adj_close DOUBLE PRECISION,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT pk_prices PRIMARY KEY (id),
+    CONSTRAINT fk_prices_ticker_id_tickers FOREIGN KEY(ticker_id) REFERENCES tickers (id) ON DELETE CASCADE,
+    CONSTRAINT uq_prices_ticker_id_date UNIQUE (ticker_id, date)
 );
 
--- 4. Key Metrics (Revised to Time-Series for historical valuation)
+CREATE INDEX ix_prices_date ON prices (date);
+
 CREATE TABLE key_metrics (
-    id BIGSERIAL PRIMARY KEY,
-    ticker_id INTEGER NOT NULL REFERENCES tickers(id),
+    id BIGSERIAL NOT NULL,
+    ticker_id INTEGER NOT NULL,
     observation_date DATE NOT NULL,
     market_cap BIGINT,
-    pe_ratio FLOAT,
-    pbv FLOAT,
-    dividend_yield FLOAT,
-    eps FLOAT,
-    roe FLOAT,
+    pe_ratio DOUBLE PRECISION,
+    pbv DOUBLE PRECISION,
+    dividend_yield DOUBLE PRECISION,
+    eps DOUBLE PRECISION,
+    roe DOUBLE PRECISION,
     fiscal_year INTEGER,
     fiscal_quarter INTEGER,
-    last_updated TIMESTAMP DEFAULT NOW(),
-    UNIQUE (ticker_id, observation_date)
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT pk_key_metrics PRIMARY KEY (id),
+    CONSTRAINT fk_key_metrics_ticker_id_tickers FOREIGN KEY(ticker_id) REFERENCES tickers (id) ON DELETE CASCADE,
+    CONSTRAINT uq_key_metrics_ticker_id_observation_date UNIQUE (ticker_id, observation_date)
 );
 
--- 5. Technical Indicators (Time-Series for chart overlays)
+CREATE TABLE sync_status (
+    id SERIAL NOT NULL,
+    ticker_id INTEGER NOT NULL,
+    last_sync_date DATE,
+    last_sync_timestamp TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) DEFAULT 'pending' NOT NULL,
+    error_message VARCHAR(500),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT pk_sync_status PRIMARY KEY (id),
+    CONSTRAINT ck_sync_status_status_valid CHECK (status IN ('pending', 'syncing', 'completed', 'error')),
+    CONSTRAINT fk_sync_status_ticker_id_tickers FOREIGN KEY(ticker_id) REFERENCES tickers (id) ON DELETE CASCADE,
+    CONSTRAINT uq_sync_status_ticker_id UNIQUE (ticker_id)
+);
+
 CREATE TABLE technical_indicators (
-    id SERIAL PRIMARY KEY,
-    ticker_id INTEGER NOT NULL REFERENCES tickers(id),
+    id BIGSERIAL NOT NULL,
+    ticker_id INTEGER NOT NULL,
     date DATE NOT NULL,
     indicator_type VARCHAR(30) NOT NULL,
     window_period INTEGER,
-    value FLOAT NOT NULL,
+    value DOUBLE PRECISION NOT NULL,
     extra_data VARCHAR(500),
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    CONSTRAINT pk_technical_indicators PRIMARY KEY (id),
+    CONSTRAINT fk_technical_indicators_ticker_id_tickers FOREIGN KEY(ticker_id) REFERENCES tickers (id) ON DELETE CASCADE,
+    CONSTRAINT uq_technical_indicators_natural_key UNIQUE NULLS NOT DISTINCT (ticker_id, indicator_type, window_period, date)
 );
-
--- 6. Sync status (per ticker sync health)
-CREATE TABLE sync_status (
-    id SERIAL PRIMARY KEY,
-    ticker_id INTEGER NOT NULL UNIQUE REFERENCES tickers(id),
-    last_sync_date DATE,
-    last_sync_timestamp TIMESTAMP,
-    status VARCHAR(20) DEFAULT 'pending',
-    error_message VARCHAR(500),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP
-);
-
--- 7. Sync Jobs (For Landing Page progress tracking)
-CREATE TABLE sync_jobs (
-    id SERIAL PRIMARY KEY,
-    sync_id VARCHAR(100) UNIQUE NOT NULL,
-    index_id INTEGER NOT NULL REFERENCES indexes(id),
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',
-    total_tickers INTEGER DEFAULT 0,
-    processed_tickers INTEGER DEFAULT 0,
-    current_ticker VARCHAR(20),
-    started_at TIMESTAMP DEFAULT NOW(),
-    completed_at TIMESTAMP,
-    error_message VARCHAR(500)
-);
-
--- Crucial Indexes for Performance
-CREATE INDEX idx_prices_ticker_date ON prices(ticker_id, date DESC);
-CREATE INDEX idx_metrics_ticker_date ON key_metrics(ticker_id, observation_date DESC);
-CREATE INDEX ix_ticker_indicator_date ON technical_indicators(ticker_id, indicator_type, date);
-CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
 ```
 
 ---
@@ -349,6 +377,7 @@ CREATE INDEX idx_sync_jobs_status ON sync_jobs(status);
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2.0 | 2026-11-15 | PostgreSQL 18 only, and the schema is managed by Alembic (`0001_baseline`), replacing `init_db.py` and SQLite support. Natural key `uq_technical_indicators_natural_key UNIQUE NULLS NOT DISTINCT (ticker_id, indicator_type, window_period, date)` replaces `ix_ticker_indicator_date`. `prices.id` and `technical_indicators.id` are BIGSERIAL. `ON DELETE CASCADE` on all ticker and index foreign keys (index hard delete now cascades as the API documents). NOT NULL with server defaults on flags, counters, statuses and creation timestamps. CHECK constraints on `sync_status.status` and `sync_jobs.status`. All timestamps are TIMESTAMPTZ. Constraint names follow the `pk_/uq_/fk_/ck_/ix_` convention. Redundant indexes are dropped and `ix_prices_date` is added. No upgrade path from older databases (fresh start). |
 | 1.1.0 | 2026-04-28 | Triangle pattern feature complete: on-demand detection for symmetrical, ascending, and descending triangles with potential and breakout states via `/charts/{ticker_symbol}/triangles` and `/screener/triangles` APIs. No schema changes; detection runs on-demand from existing `prices` data. |
 | 1.0.1 | 2026-04-14 | Documented MACD mode-aware storage conventions in `technical_indicators` using `indicator_type` values `macd_sma` and `macd_ema`, plus legacy `macd` compatibility during migration/backfill. |
 | 1.0.0 | 2026-04-10 | First stable schema release docs. Confirmed ORM alignment for all active tables/constraints, clarified sync job status compatibility (`running` legacy mapped to `in_progress` at API layer), and corrected `technical_indicators.ticker_id` as NOT NULL in table docs. |
