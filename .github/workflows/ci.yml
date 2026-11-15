@@ -37,16 +37,19 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_USER: stockhub
+          # Superuser: integration tests create and drop their own scratch databases (needs CREATEDB)
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-only-throwaway
-          POSTGRES_DB: stockhub_test
+          POSTGRES_DB: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U stockhub -d stockhub_test"
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://stockhub:ci-only-throwaway@localhost:5432/stockhub_test
+      DATABASE_URL: postgresql://postgres:ci-only-throwaway@localhost:5432/postgres
+      # Without this the Alembic integration tests skip instead of running
+      TEST_DATABASE_URL: postgresql://postgres:ci-only-throwaway@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
