@@ -26,6 +26,8 @@ This file briefs coding agents working in this repository.
   - `frontend/src/app/`: route pages (`/`, `/tickers`, `/tickers/[symbol]`, `/screener`).
   - `frontend/src/components/`: feature components (landing, charts, screener, ticker).
   - `frontend/src/lib/api.ts`: frontend API client (must stay contract-aligned).
+  - `frontend/src/lib/chartTheme.ts`: chart colours derived from the CSS variables in `globals.css`.
+  - `frontend/src/lib/` must stay tracked: Python ignore rules in `.gitignore` are anchored to `/backend/`; never add unanchored `lib/`, `build/`, `dist/` or `env/` rules.
   - `frontend/src/types/index.ts`: request/response types (must stay contract-aligned).
 - Root scripts:
   - `start.sh`: one-command local startup (DB + backend + frontend).
