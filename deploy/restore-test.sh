@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Restore test: load a dump into a throwaway PostgreSQL container and check it, without touching the
 # live database. Usage: restore-test.sh [dump.sql.gz]   (default: newest local dump)
-# Result goes to journald and to $STATE_DIR/last-restore-test (read by the homelab health check).
+# Result goes to journald and to $STATE_DIR/last-restore-test, one line:
+#   date=YYYY-MM-DD file=<dump> result=OK|FAIL tables=N rows=N
+# The Proxmox host's nightly backup hook reads it with `pct pull` and fails when it is FAIL or over 35 days old.
 set -euo pipefail
 umask 027
 OUT="${BACKUP_DIR:-/var/backups/stockhub}"
@@ -11,15 +13,15 @@ NAME="stockhub-restore-test-$$"
 file="${1:-$(ls -1t "$OUT"/daily-*.sql.gz 2>/dev/null | head -n1 || true)}"
 mkdir -p "$STATE_DIR"
 
-record() { # status, detail
-  printf 'date=%s\nfile=%s\nresult=%s\ndetail=%s\n' "$(date -Is)" "$(basename "${file:-none}")" "$1" "$2" \
+record() { # result, detail (single line of key=value pairs, read by the host's nightly hook)
+  printf 'date=%s file=%s result=%s %s\n' "$(date +%F)" "$(basename "${file:-none}")" "$1" "$2" \
     > "$STATE_DIR/last-restore-test.tmp"
   mv -f "$STATE_DIR/last-restore-test.tmp" "$STATE_DIR/last-restore-test"
   echo "restore test $1: $2"
 }
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
-fail() { record FAIL "$1"; exit 1; }
+fail() { record FAIL "tables=0 rows=0 error=\"${1// /_}\""; exit 1; }
 
 [[ -n "$file" && -s "$file" ]] || fail "no dump found in $OUT"
 gzip -t "$file" || fail "dump is not a valid gzip file"

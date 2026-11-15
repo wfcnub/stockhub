@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Nightly local pg_dump of the StockHub database: 7 daily + 4 weekly + 3 monthly copies.
-# The off-host copy is made by rclone (owned by Elymas, runs after this timer, copies *.sql.gz).
-# Dumps hold all data: dir is stockhub:stockhub-backup mode 2750, files 640 (read by the pickup user only).
+# The off-host copy is made from the Proxmox host (Elymas): `pct pull` plus rclone to Google Drive after
+# the 03:30 vzdump job, so no Drive token lives on this guest. Dumps hold all data (no secrets):
+# dir is stockhub:stockhub mode 750, files 640.
 set -euo pipefail
 umask 027
 DIR="${STOCKHUB_DIR:-/opt/stockhub}"
