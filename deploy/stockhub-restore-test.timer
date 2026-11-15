@@ -2,7 +2,7 @@
 Description=Monthly StockHub restore test
 
 [Timer]
-# 1st of each month, 04:00 WIB: after the 03:00 dump and the 03:30 Drive pickup
+# 1st of each month, 04:00 WIB: after the 00:30 dump and the 01:00 Drive pickup
 OnCalendar=*-*-01 04:00:00 Asia/Jakarta
 Persistent=true
 

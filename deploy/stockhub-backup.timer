@@ -1,9 +1,9 @@
 [Unit]
-Description=Nightly StockHub database backup at 03:00 WIB
+Description=Nightly StockHub database backup at 00:30 WIB
 
 [Timer]
-# 03:00 WIB (UTC+7). If the guest timezone is UTC this is 20:00 UTC the day before
-OnCalendar=*-*-* 03:00:00 Asia/Jakarta
+# 00:30 WIB (UTC+7) = 17:30 UTC the day before. Must finish before the 01:00 WIB host backup and Drive upload
+OnCalendar=*-*-* 00:30:00 Asia/Jakarta
 Persistent=true
 
 [Install]
