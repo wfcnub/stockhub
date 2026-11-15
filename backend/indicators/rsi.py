@@ -62,32 +62,35 @@ class RSI(BaseIndicator):
         gain = delta.where(delta > 0, 0)
         loss = (-delta).where(delta < 0, 0)
 
-        # Use Wilder's Smoothing (exponential moving average)
-        # First average is simple average of first 'period' values
-        avg_gain = gain.iloc[1 : self.period + 1].mean()
-        avg_loss = loss.iloc[1 : self.period + 1].mean()
+        results: List[IndicatorResult] = []
+        if len(df) <= self.period:
+            return results
 
-        results = []
+        # Wilder (1978): seed the averages with the simple mean of the first `period` changes
+        # (bars 1..period). The first RSI is reported at bar `period` from that seed; Wilder
+        # smoothing applies from bar period+1 on. (Previously bar `period` was applied twice.)
+        avg_gain = float(gain.iloc[1 : self.period + 1].mean())
+        avg_loss = float(loss.iloc[1 : self.period + 1].mean())
 
-        # Calculate RSI for each period after the initial averaging
         for idx in range(self.period, len(df)):
-            # Update averages using Wilder's smoothing
-            current_gain = gain.iloc[idx]
-            current_loss = loss.iloc[idx]
+            if idx > self.period:
+                avg_gain = (avg_gain * (self.period - 1) + float(gain.iloc[idx])) / self.period
+                avg_loss = (avg_loss * (self.period - 1) + float(loss.iloc[idx])) / self.period
 
-            avg_gain = (avg_gain * (self.period - 1) + current_gain) / self.period
-            avg_loss = (avg_loss * (self.period - 1) + current_loss) / self.period
-
-            if avg_loss == 0:
-                rsi_value = 100.0
-            else:
-                rs = avg_gain / avg_loss
-                rsi_value = 100 - (100 / (1 + rs))
-
+            rsi_value = self._rsi_from_averages(avg_gain, avg_loss)
             if not np.isnan(rsi_value):
                 results.append(IndicatorResult(date=df.iloc[idx]["date"], value=float(rsi_value)))
 
         return results
+
+    @staticmethod
+    def _rsi_from_averages(avg_gain: float, avg_loss: float) -> float:
+        """RSI = 100 - 100 / (1 + RS). No losses: 100; no gains and no losses (flat): 50,
+        the neutral value TA-Lib also returns, so suspended or untraded stretches don't
+        read as overbought."""
+        if avg_loss == 0:
+            return 50.0 if avg_gain == 0 else 100.0
+        return 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
 
     @property
     def display_name(self) -> str:
