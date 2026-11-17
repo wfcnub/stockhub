@@ -24,10 +24,7 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # NEXT_PUBLIC_* is baked in at build time: keep it relative so one image works everywhere.
 ARG NEXT_PUBLIC_API_URL=/api/v1
-# Where the Next /api proxy sends requests (resolved at build time in standalone mode).
-ARG BACKEND_INTERNAL_URL=http://backend:8000
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
-    BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN mkdir -p public && npm run build
@@ -38,7 +35,8 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
-    PORT=3000
+    PORT=3000 \
+    BACKEND_INTERNAL_URL=http://backend:8000
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public

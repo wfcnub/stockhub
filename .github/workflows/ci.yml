@@ -80,7 +80,7 @@ jobs:
       - name: Mypy (not blocking yet; make it required once it passes)
         if: steps.detect.outputs.uv == 'true'
         continue-on-error: true
-        run: uv run mypy app
+        run: uv run mypy app indicators
       - name: Pytest
         if: steps.detect.outputs.uv == 'true' && steps.detect.outputs.tests == 'true'
         run: uv run pytest -q
@@ -112,7 +112,6 @@ jobs:
       - name: Build
         env:
           NEXT_PUBLIC_API_URL: /api/v1
-          BACKEND_INTERNAL_URL: http://backend:8000
         run: npm run build
 
   docker:

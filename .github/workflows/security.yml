@@ -85,8 +85,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # TODO: report-only until the frontend upgrade (Next 16, axios) lands, because the current
-      # lockfile has fixable HIGH findings. Then set exit-code to "1" on the table step to make it blocking.
+      # TODO: still report-only (checked 2026-11-17). npm audit shows fixable HIGH findings (axios, form-data)
+      # in frontend/package-lock.json (`npm audit fix`); uv.lock is clean (pip-audit). Set exit-code to "1"
+      # on the first scan step once the frontend is clean, to make it blocking.
       - name: Scan (log)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

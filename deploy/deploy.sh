@@ -58,8 +58,8 @@ rollback() {
 compose pull || rollback
 compose up -d --wait db || rollback
 
-# Create or update tables with the new image before it serves traffic (idempotent)
-compose run --rm --no-deps backend python init_db.py || rollback
+# Apply schema migrations with the new image before it serves traffic (idempotent)
+compose run --rm --no-deps backend alembic upgrade head || rollback
 
 compose up -d --remove-orphans || rollback
 

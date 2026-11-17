@@ -30,7 +30,8 @@ Cloudflare Access in front. The tunnel points at `http://<guest>:3000` (the fron
 ## Requirements this puts on the app
 - Backend `GET /health` (root path) returning 200 only when the database answers: image healthcheck, deploy health gate and Elymas's monitor use it. **Without it the deploy rolls back.**
 - `backend/uv.lock` committed; until then the backend image is not built or published.
-- Tables are created by `python init_db.py` (run before each deploy by `deploy.sh`). Replace that step with Alembic when migrations exist.
+- Schema: `deploy.sh` runs `alembic upgrade head` in a one-shot backend container before the stack restarts (idempotent; migrations live in `backend/migrations`, the image carries `alembic.ini` and `migrations/`).
+- Daily sync: `sync.sh` creates the index row if missing, then runs `python -m app.sync run --index JCI` in a one-shot backend container (Mon-Fri 17:30 WIB, after the 17:00 WIB final-bar cutoff). Worker exit codes: `0` ok or cancelled; `1` failed (the unit fails, so it shows in `systemctl --failed`); `2` finished but some tickers failed (logged as a warning, unit succeeds; details in `sync_status` and `sync_jobs.error_message`); `3` another sync is already running (skipped, unit succeeds). `POST /api/v1/sync/start` still works for manual runs from inside the backend.
 - The API has **no authentication**. Access (edge) is the only gate, and Next must forward only GET/HEAD to `/api` until the admin token exists. The backend and database publish no ports.
 
 ## Backups

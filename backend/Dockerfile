@@ -49,7 +49,8 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --chown=app:app app ./app
 COPY --chown=app:app indicators ./indicators
-COPY --chown=app:app init_db.py ./
+COPY --chown=app:app alembic.ini ./
+COPY --chown=app:app migrations ./migrations
 USER 10001:10001
 # Needs a GET /health route on the backend (checks the database); see deploy/README.md
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

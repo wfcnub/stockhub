@@ -71,6 +71,9 @@ services:
   frontend:
     <<: *hardening
     image: ghcr.io/wfcnub/stockhub-frontend:${STOCKHUB_TAG:?set STOCKHUB_TAG (deploy.sh does this)}
+    environment:
+      # Read by the Next /api proxy at runtime (GET and HEAD only are forwarded)
+      BACKEND_INTERNAL_URL: http://backend:8000
     read_only: true
     tmpfs:
       - /tmp
