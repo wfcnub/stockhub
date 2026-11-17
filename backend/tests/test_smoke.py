@@ -21,7 +21,24 @@ def test_root_reports_version() -> None:
     assert response.json() == {"message": "StockHub API", "version": __version__}
 
 
-def test_health() -> None:
+def test_health(monkeypatch) -> None:
+    import app.main as main_module
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, statement):
+            assert str(statement) == "SELECT 1"
+
+    class _HealthyEngine:
+        def connect(self):
+            return _Conn()
+
+    monkeypatch.setattr(main_module, "engine", _HealthyEngine())
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}

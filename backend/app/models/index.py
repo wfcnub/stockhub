@@ -1,8 +1,16 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import DateTime, String, func, text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+if TYPE_CHECKING:
+    from app.models.sync_job import SyncJob
+    from app.models.ticker import Ticker
 
 
 class Index(Base):
@@ -10,18 +18,24 @@ class Index(Base):
 
     __tablename__ = "indexes"
 
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(20), unique=True, nullable=False)  # e.g., "JCI"
-    name = Column(String(255), nullable=False)  # e.g., "Jakarta Composite Index"
-    yfinance_suffix = Column(String(10), default="")  # e.g., ".JK" for IDX
-    ticker_count = Column(Integer, default=0)  # Number of tickers in index
-    is_active = Column(Boolean, default=True)
-    last_synced_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True)  # e.g., "JCI"
+    name: Mapped[str] = mapped_column(String(255))  # e.g., "Jakarta Composite Index"
+    yfinance_suffix: Mapped[str] = mapped_column(
+        String(10), default="", server_default=text("''")
+    )  # e.g., ".JK" for IDX
+    ticker_count: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
-    tickers = relationship("Ticker", back_populates="index")
-    sync_jobs = relationship("SyncJob", back_populates="index")
+    # Hard delete of an index removes its tickers and jobs (ON DELETE CASCADE in the DB).
+    tickers: Mapped[list[Ticker]] = relationship(
+        back_populates="index", cascade="all, delete-orphan", passive_deletes=True
+    )
+    sync_jobs: Mapped[list[SyncJob]] = relationship(
+        back_populates="index", cascade="all, delete-orphan", passive_deletes=True
+    )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Index(code={self.code}, name={self.name})>"

@@ -18,18 +18,22 @@ def _parse_list(value: Any) -> Any:
 
 
 def _normalize_database_url(url: str) -> str:
-    """Make the PostgreSQL driver explicit (psycopg 3); leave other URLs untouched."""
+    """Make the PostgreSQL driver explicit (psycopg 3). PostgreSQL is the only supported DB."""
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
             return "postgresql+psycopg://" + url[len(prefix) :]
-    return url
+    if url.startswith("postgresql+psycopg://"):
+        return url
+    raise ValueError(
+        "DATABASE_URL must be a PostgreSQL URL (postgresql://... or postgresql+psycopg://...)"
+    )
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Database
-    DATABASE_URL: str = "sqlite:///./stockhub.db"
+    # Database: required, PostgreSQL only (no default, so a missing setting fails loudly)
+    DATABASE_URL: str
 
     # CORS settings for frontend
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [

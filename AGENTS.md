@@ -38,12 +38,14 @@ This file briefs coding agents working in this repository.
   - `./stop.sh`
 - Backend local (Python 3.14, managed by uv; dependencies in `backend/pyproject.toml` and `backend/uv.lock`):
   - `cd backend && uv sync`
+  - `cd backend && uv run alembic upgrade head` (PostgreSQL 18 only; `DATABASE_URL` required)
   - `cd backend && uv run uvicorn app.main:app --reload --port 8000`
 - Backend quality gates (CI runs the same):
   - `cd backend && uv run ruff check . && uv run ruff format --check .`
   - `cd backend && uv run pytest`
   - `cd backend && uv run mypy app` (informational until the models move to `Mapped[]`)
   - Add or change dependencies with `uv add` / `uv add --dev`, never by hand-editing `uv.lock`.
+  - Schema changes: edit the models, `uv run alembic revision --autogenerate -m "..."`, review it, update `DB_DESIGN.md`. PostgreSQL tests run when `TEST_DATABASE_URL` points at a PostgreSQL 18 server whose role has CREATEDB.
 - Frontend local:
   - `cd frontend && npm run dev`
 - Frontend quality gates:
