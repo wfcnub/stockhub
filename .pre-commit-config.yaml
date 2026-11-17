@@ -1,0 +1,36 @@
+# Backend hooks only for now (the frontend keeps its own npm lint).
+# Install: `pre-commit install` from the repo root.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^backend/
+      - id: end-of-file-fixer
+        files: ^backend/
+      - id: check-yaml
+      - id: check-toml
+        files: ^backend/
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5  # keep in step with the ruff pin in backend/pyproject.toml
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: local
+    hooks:
+      # Non-blocking for now: runs only with `pre-commit run mypy --hook-stage manual --all-files`.
+      - id: mypy
+        name: mypy (backend, informational)
+        entry: uv run --directory backend mypy app indicators
+        language: system
+        pass_filenames: false
+        files: ^backend/
+        stages: [manual]

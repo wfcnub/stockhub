@@ -2,10 +2,10 @@
 Yahoo Finance tools for downloading stock data
 """
 
-import numpy as np
+from datetime import datetime
+
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
 from curl_cffi import requests
 
 
@@ -21,10 +21,7 @@ def _parse_history_datetime(value: str | datetime | None, fallback: datetime) ->
 
 
 def download_stock_data(
-    symbol: str,
-    start_date: str = None,
-    end_date: str = None,
-    suffix: str = ""
+    symbol: str, start_date: str = None, end_date: str = None, suffix: str = ""
 ) -> pd.DataFrame:
     """
     Downloads historical stock data from Yahoo Finance for a given symbol
@@ -48,11 +45,11 @@ def download_stock_data(
     full_symbol = f"{symbol}{suffix}" if suffix else symbol
     ticker = yf.Ticker(full_symbol, session=session)
 
-    start = _parse_history_datetime(start_date, datetime.strptime('2021-01-01', '%Y-%m-%d'))
+    start = _parse_history_datetime(start_date, datetime.strptime("2021-01-01", "%Y-%m-%d"))
     end = _parse_history_datetime(end_date, datetime.now())
     data = ticker.history(start=start, end=end)
 
-    columns_to_drop = ['Dividends', 'Stock Splits', 'Capital Gains']
+    columns_to_drop = ["Dividends", "Stock Splits", "Capital Gains"]
     for col in columns_to_drop:
         if col in data.columns:
             data.drop(columns=[col], inplace=True)
@@ -60,8 +57,8 @@ def download_stock_data(
     data.reset_index(inplace=True)
 
     try:
-        data['Date'] = data['Date'].dt.date
-    except:
+        data["Date"] = data["Date"].dt.date
+    except Exception:
         pass
 
     return data

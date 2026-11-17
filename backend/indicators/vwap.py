@@ -1,6 +1,7 @@
 from typing import List
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 from .base import BaseIndicator, IndicatorResult
 from .registry import register_indicator
@@ -54,10 +55,10 @@ class VWAP(BaseIndicator):
         df = self.prepare_dataframe(df)
 
         # Calculate typical price
-        typical_price = (df['high'] + df['low'] + df['close']) / 3
+        typical_price = (df["high"] + df["low"] + df["close"]) / 3
 
         # Calculate cumulative TP * Volume and cumulative Volume
-        tp_volume = typical_price * df['volume']
+        tp_volume = typical_price * df["volume"]
 
         if self.reset_daily:
             # For daily data with reset_daily, VWAP equals typical price
@@ -65,20 +66,24 @@ class VWAP(BaseIndicator):
         else:
             # Cumulative VWAP
             cum_tp_volume = tp_volume.cumsum()
-            cum_volume = df['volume'].cumsum()
+            cum_volume = df["volume"].cumsum()
             vwap = cum_tp_volume / cum_volume
 
         results = []
         for idx in range(len(df)):
             if not pd.isna(vwap.iloc[idx]) and not np.isinf(vwap.iloc[idx]):
-                results.append(IndicatorResult(
-                    date=df.iloc[idx]['date'],
-                    value=float(vwap.iloc[idx]),
-                    metadata={
-                        "typical_price": float(typical_price.iloc[idx]),
-                        "cumulative_volume": int(cum_volume.iloc[idx]) if not self.reset_daily else int(df['volume'].iloc[idx])
-                    }
-                ))
+                results.append(
+                    IndicatorResult(
+                        date=df.iloc[idx]["date"],
+                        value=float(vwap.iloc[idx]),
+                        metadata={
+                            "typical_price": float(typical_price.iloc[idx]),
+                            "cumulative_volume": int(cum_volume.iloc[idx])
+                            if not self.reset_daily
+                            else int(df["volume"].iloc[idx]),
+                        },
+                    )
+                )
 
         return results
 

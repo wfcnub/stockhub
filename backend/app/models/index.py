@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -7,6 +7,7 @@ from app.db.database import Base
 
 class Index(Base):
     """Model for market indexes (e.g., JCI - Jakarta Composite Index)"""
+
     __tablename__ = "indexes"
 
     id = Column(Integer, primary_key=True, index=True)

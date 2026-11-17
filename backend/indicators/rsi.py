@@ -1,6 +1,7 @@
 from typing import List
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 from .base import BaseIndicator, IndicatorResult
 from .registry import register_indicator
@@ -55,7 +56,7 @@ class RSI(BaseIndicator):
         df = self.prepare_dataframe(df)
 
         # Calculate price changes
-        delta = df['close'].diff()
+        delta = df["close"].diff()
 
         # Separate gains and losses
         gain = delta.where(delta > 0, 0)
@@ -63,8 +64,8 @@ class RSI(BaseIndicator):
 
         # Use Wilder's Smoothing (exponential moving average)
         # First average is simple average of first 'period' values
-        avg_gain = gain.iloc[1:self.period + 1].mean()
-        avg_loss = loss.iloc[1:self.period + 1].mean()
+        avg_gain = gain.iloc[1 : self.period + 1].mean()
+        avg_loss = loss.iloc[1 : self.period + 1].mean()
 
         results = []
 
@@ -84,10 +85,7 @@ class RSI(BaseIndicator):
                 rsi_value = 100 - (100 / (1 + rs))
 
             if not np.isnan(rsi_value):
-                results.append(IndicatorResult(
-                    date=df.iloc[idx]['date'],
-                    value=float(rsi_value)
-                ))
+                results.append(IndicatorResult(date=df.iloc[idx]["date"], value=float(rsi_value)))
 
         return results
 

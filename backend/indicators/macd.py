@@ -74,8 +74,8 @@ class MACD(BaseIndicator):
         df = self.prepare_dataframe(df)
 
         # Calculate fast and slow moving averages using configured mode.
-        fast_ma = self._moving_average(df['close'], self.fast_period)
-        slow_ma = self._moving_average(df['close'], self.slow_period)
+        fast_ma = self._moving_average(df["close"], self.fast_period)
+        slow_ma = self._moving_average(df["close"], self.slow_period)
 
         # MACD Line
         macd_line = fast_ma - slow_ma
@@ -92,15 +92,17 @@ class MACD(BaseIndicator):
         results = []
         for idx in range(len(df)):
             if idx >= min_idx and not pd.isna(macd_line.iloc[idx]):
-                results.append(IndicatorResult(
-                    date=df.iloc[idx]['date'],
-                    value=float(macd_line.iloc[idx]),
-                    metadata={
-                        "signal": float(signal_line.iloc[idx]),
-                        "histogram": float(histogram.iloc[idx]),
-                        "ma_type": self.ma_type,
-                    }
-                ))
+                results.append(
+                    IndicatorResult(
+                        date=df.iloc[idx]["date"],
+                        value=float(macd_line.iloc[idx]),
+                        metadata={
+                            "signal": float(signal_line.iloc[idx]),
+                            "histogram": float(histogram.iloc[idx]),
+                            "ma_type": self.ma_type,
+                        },
+                    )
+                )
 
         return results
 
