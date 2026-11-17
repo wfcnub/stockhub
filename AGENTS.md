@@ -39,6 +39,7 @@ This file briefs coding agents working in this repository.
 - Backend local (Python 3.14, managed by uv; dependencies in `backend/pyproject.toml` and `backend/uv.lock`):
   - `cd backend && uv sync`
   - `cd backend && uv run alembic upgrade head` (PostgreSQL 18 only; `DATABASE_URL` required)
+  - Local test PostgreSQL (user-space, no root, gitignored `backend/.local-pg/`): `cd backend && scripts/local-pg.sh setup`, then `LOCAL_PG=1 uv run pytest`; remove it with `scripts/local-pg.sh destroy`. `TEST_DATABASE_URL` takes precedence; CI uses its own PostgreSQL 18 service.
   - `cd backend && uv run uvicorn app.main:app --reload --port 8000`
 - Backend quality gates (CI runs the same):
   - `cd backend && uv run ruff check . && uv run ruff format --check .`
