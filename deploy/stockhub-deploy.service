@@ -1,0 +1,12 @@
+[Unit]
+Description=StockHub deploy (pull newest release tag)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=stockhub
+Group=docker
+ExecStart=/opt/stockhub/bin/deploy.sh
+TimeoutStartSec=15min

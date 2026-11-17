@@ -1,0 +1,10 @@
+[Unit]
+Description=StockHub database backup (local pg_dump)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=stockhub
+Group=docker
+ExecStart=/opt/stockhub/bin/backup.sh

@@ -37,5 +37,11 @@ if command -v docker >/dev/null 2>&1; then
     fi
 fi
 
+# Stop the user-space PostgreSQL (backend/scripts/local-pg.sh), if it was set up
+LOCAL_PG="$(dirname "${BASH_SOURCE[0]}")/backend/scripts/local-pg.sh"
+if [ -d "$(dirname "$LOCAL_PG")/../.local-pg" ]; then
+    "$LOCAL_PG" stop >/dev/null 2>&1 && print_success "Local PostgreSQL stopped" || print_warning "Could not stop local PostgreSQL"
+fi
+
 echo ""
 print_success "All services stopped!"

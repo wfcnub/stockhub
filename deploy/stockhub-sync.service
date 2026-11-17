@@ -1,0 +1,10 @@
+[Unit]
+Description=StockHub daily data sync
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=stockhub
+Group=docker
+ExecStart=/opt/stockhub/bin/sync.sh

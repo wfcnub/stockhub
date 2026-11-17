@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly StockHub database backup at 00:30 WIB
+
+[Timer]
+# 00:30 WIB (UTC+7) = 17:30 UTC the day before. Must finish before the 01:00 WIB host backup and Drive upload
+OnCalendar=*-*-* 00:30:00 Asia/Jakarta
+Persistent=true
+
+[Install]
+WantedBy=timers.target
