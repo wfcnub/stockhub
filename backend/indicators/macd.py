@@ -3,6 +3,7 @@ from typing import List
 import pandas as pd
 
 from .base import BaseIndicator, IndicatorResult
+from .moving_averages import ema_sma_seeded
 from .registry import register_indicator
 
 
@@ -57,7 +58,10 @@ class MACD(BaseIndicator):
 
     def _moving_average(self, series: pd.Series, period: int) -> pd.Series:
         if self.ma_type == "ema":
-            return series.ewm(span=period, adjust=False).mean()
+            # Textbook EMA, each line seeded with the SMA of its own first `period` values.
+            # (TA-Lib's MACD instead seeds the fast EMA at the slow EMA's first bar; the two
+            # agree to ~1e-12 after about 200 bars. See tests/test_indicator_golden.py.)
+            return ema_sma_seeded(series, period)
 
         return series.rolling(window=period, min_periods=period).mean()
 
