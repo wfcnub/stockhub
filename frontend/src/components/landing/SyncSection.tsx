@@ -1,10 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { Index, SyncProgress } from '@/types';
-import { getIndexes, startSync, getSyncProgress, stopSync } from '@/lib/api';
+import { ADMIN_ACTIONS_ENABLED, startSync, getSyncProgress, stopSync } from '@/lib/api';
+import { indexesQuery } from '@/lib/queries';
+import { AdminActionsNotice } from '@/components/layout/AdminActionsNotice';
 
 const ACTIVE_SYNC_STORAGE_KEY = 'stockhub.active-sync-id';
+
+// Stable reference for the "no data yet" list.
+const EMPTY_INDEXES: Index[] = [];
 
 const isTerminalStatus = (status: SyncProgress['status']) => {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
@@ -15,34 +21,19 @@ const isNotFoundError = (error: unknown) => {
 };
 
 export function SyncSection() {
-  const [indexes, setIndexes] = useState<Index[]>([]);
-  const [selectedIndex, setSelectedIndex] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
+  const indexesResult = useQuery(indexesQuery(true));
+  const indexes = indexesResult.data ?? EMPTY_INDEXES;
+  const isLoading = indexesResult.isPending;
+  // The user's choice wins; until they pick one, the first active index is selected.
+  const [chosenIndex, setSelectedIndex] = useState<string>('');
+  const selectedIndex = chosenIndex || (indexes.find((idx) => idx.is_active)?.code ?? '');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [syncError, setError] = useState<string | null>(null);
+  // Sync errors replace the index-loading error once an action has failed or been retried.
+  const error = syncError ?? (indexesResult.error ? indexesResult.error.message : null);
   const [syncId, setSyncId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchIndexes = async () => {
-      try {
-        const data = await getIndexes(true);
-        setIndexes(data);
-
-        const firstActiveIndex = data.find((idx) => idx.is_active);
-        if (firstActiveIndex) {
-          setSelectedIndex(firstActiveIndex.code);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load indexes');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchIndexes();
-  }, []);
 
   // Poll for sync progress when syncing
   const pollProgress = useCallback(async (currentSyncId: string) => {
@@ -226,7 +217,12 @@ export function SyncSection() {
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
             </svg>
           </div>
           <div>
@@ -240,8 +236,18 @@ export function SyncSection() {
 
       {error && (
         <div className="mb-4 flex items-center gap-2 rounded-gemini border border-gemini-accent-red/30 bg-gemini-accent-red/10 p-4">
-          <svg className="w-5 h-5 text-gemini-accent-red flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            className="w-5 h-5 text-gemini-accent-red flex-shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
           <p className="text-gemini-accent-red text-sm">{error}</p>
         </div>
@@ -268,9 +274,11 @@ export function SyncSection() {
           </select>
         </div>
 
+        <AdminActionsNotice />
+
         <button
           onClick={isSyncing ? handleStopSync : handleStartSync}
-          disabled={isSyncing ? isStopping || !syncId : !selectedIndex}
+          disabled={!ADMIN_ACTIONS_ENABLED || (isSyncing ? isStopping || !syncId : !selectedIndex)}
           className={`flex w-full items-center justify-center gap-2 ${
             isSyncing
               ? 'gemini-button border-gemini-accent-red/70 bg-transparent text-gemini-accent-red hover:bg-gemini-accent-red/10'
@@ -281,7 +289,12 @@ export function SyncSection() {
             isStopping ? (
               <>
                 <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
                 </svg>
                 <span>Stopping...</span>
               </>
@@ -296,7 +309,12 @@ export function SyncSection() {
           ) : (
             <>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                />
               </svg>
               <span>Start Sync</span>
             </>
@@ -353,8 +371,18 @@ export function SyncSection() {
 
         {syncProgress?.status === 'completed' && (
           <div className="flex items-center gap-2 rounded-gemini border border-gemini-accent-green/30 bg-gemini-accent-green/10 p-4">
-            <svg className="w-5 h-5 text-gemini-accent-green flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              className="w-5 h-5 text-gemini-accent-green flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             <div>
               <p className="font-medium text-gemini-accent-green">Sync completed successfully</p>
@@ -367,7 +395,12 @@ export function SyncSection() {
 
         {syncProgress?.status === 'cancelled' && (
           <div className="flex items-center gap-2 rounded-gemini border border-gemini-accent-orange/30 bg-gemini-accent-orange/10 p-4">
-            <svg className="w-5 h-5 text-gemini-accent-orange flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              className="w-5 h-5 text-gemini-accent-orange flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6h12v12H6z" />
             </svg>
             <div>

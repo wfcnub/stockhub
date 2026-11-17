@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 
 const THEME_SLIDE_DURATION_MS = 420;
@@ -13,9 +13,20 @@ type ViewTransitionCapableDocument = Document & {
   };
 };
 
+const subscribeNever = () => () => {};
+
+/** False during SSR and hydration, true once mounted in the browser (no setState-in-effect needed). */
+function useIsMounted(): boolean {
+  return useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false,
+  );
+}
+
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsMounted();
   const transitionCleanupRef = useRef<number | null>(null);
 
   const clearThemeTransitionMarker = () => {
@@ -28,8 +39,6 @@ export function ThemeToggle() {
   };
 
   useEffect(() => {
-    setMounted(true);
-
     return () => {
       clearThemeTransitionMarker();
     };
@@ -69,7 +78,6 @@ export function ThemeToggle() {
     transition.finished.finally(() => {
       clearThemeTransitionMarker();
     });
-
   };
 
   return (

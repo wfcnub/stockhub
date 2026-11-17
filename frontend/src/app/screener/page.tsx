@@ -3,12 +3,15 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ControlShell } from '@/components/layout/ControlShell';
-import { getDivergenceScreener, getTriangleScreener } from '@/lib/api';
+import { divergenceScreenerQuery, triangleScreenerQuery } from '@/lib/queries';
+import { parseBooleanParam, parseBoundedInteger } from '@/lib/urlParams';
 import type { DivergenceConfigParams } from '@/lib/api';
 import type {
   BreakoutDirection,
   DivergenceScreenerItem,
+  DivergenceScreenerResponse,
   TriangleConfigParams,
   TriangleScreenerItem,
   TriangleState,
@@ -89,18 +92,18 @@ function normalizeSignalType(value: unknown): NormalizedSignalType | null {
   }
 
   if (
-    normalized === 'regular'
-    || normalized === 'regular_bullish'
-    || normalized === 'bullish_regular'
-    || normalized.includes('regular')
+    normalized === 'regular' ||
+    normalized === 'regular_bullish' ||
+    normalized === 'bullish_regular' ||
+    normalized.includes('regular')
   ) {
     return 'regular';
   }
   if (
-    normalized === 'hidden'
-    || normalized === 'hidden_bullish'
-    || normalized === 'bullish_hidden'
-    || normalized.includes('hidden')
+    normalized === 'hidden' ||
+    normalized === 'hidden_bullish' ||
+    normalized === 'bullish_hidden' ||
+    normalized.includes('hidden')
   ) {
     return 'hidden';
   }
@@ -195,34 +198,6 @@ function toTriangleDirectionFilter(value: string | null): TriangleDirectionFilte
   return 'all';
 }
 
-function toBooleanQueryValue(value: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-}
-
-function toBoundedInteger(
-  value: string | null,
-  fallback: number,
-  minimum: number,
-  maximum: number,
-): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  const rounded = Math.round(parsed);
-  if (rounded < minimum || rounded > maximum) {
-    return fallback;
-  }
-
-  return rounded;
-}
-
 function normalizeIndexCode(value: string): string {
   return value.trim().toUpperCase();
 }
@@ -283,6 +258,76 @@ function formatBreakoutDirection(value: BreakoutDirection | null): string {
   return value === 'bullish' ? 'Bullish' : 'Bearish';
 }
 
+// Stable empty references so memoised values do not change identity on every render.
+const EMPTY_DIVERGENCE_RESULTS: DivergenceScreenerItem[] = [];
+const EMPTY_TRIANGLE_RESULTS: TriangleScreenerItem[] = [];
+
+function normalizeDivergenceResults(response: DivergenceScreenerResponse): DivergenceScreenerItem[] {
+  return response.results.map((item) => {
+    const itemWithAliases = item as DivergenceScreenerItem & DivergenceItemAliases;
+    const signalType = normalizeSignalType(
+      firstDefined(
+        itemWithAliases.type,
+        itemWithAliases.divergence_type,
+        itemWithAliases.logic_type,
+        itemWithAliases.signal_type,
+      ),
+    );
+    const grade = normalizeGrade(
+      firstDefined(itemWithAliases.grade, itemWithAliases.grade_type, itemWithAliases.signal_grade),
+    );
+    const strategyType = normalizeStrategyType(
+      firstDefined(
+        itemWithAliases.strategy_type,
+        itemWithAliases.strategy,
+        itemWithAliases.strategy_name,
+        itemWithAliases.strategyType,
+      ),
+    );
+
+    const signalTimestamp =
+      typeof (item as { signal_timestamp?: unknown }).signal_timestamp === 'number'
+        ? Number((item as { signal_timestamp: number }).signal_timestamp)
+        : typeof item.confirmation_timestamp === 'number'
+          ? Number(item.confirmation_timestamp)
+          : Number(item.p2.timestamp);
+
+    const invalidationLevel =
+      typeof (item as { invalidation_level?: unknown }).invalidation_level === 'number'
+        ? Number((item as { invalidation_level: number }).invalidation_level)
+        : null;
+
+    const isInvalidated =
+      typeof (item as { is_invalidated?: unknown }).is_invalidated === 'boolean'
+        ? Boolean((item as { is_invalidated: boolean }).is_invalidated)
+        : false;
+
+    const inferredStrategyType =
+      strategyType ?? (invalidationLevel !== null ? 'BULLISH_AGGRESSIVE' : 'BULLISH_CONFIRMED');
+
+    const inferredGrade =
+      grade ?? (inferredStrategyType === 'BULLISH_AGGRESSIVE' && item.p2.rsi_14 <= 30 ? 'oversold' : 'neutral');
+
+    const actionHint =
+      typeof (item as { action?: unknown }).action === 'string'
+        ? String((item as { action: string }).action)
+        : inferredStrategyType === 'BULLISH_AGGRESSIVE'
+          ? 'Potential Bottom - Monitor for Open Entry.'
+          : 'Confirmed divergence setup';
+
+    return {
+      ...item,
+      type: signalType ?? 'regular',
+      strategy_type: inferredStrategyType,
+      grade: inferredGrade,
+      signal_timestamp: signalTimestamp,
+      invalidation_level: invalidationLevel,
+      is_invalidated: isInvalidated,
+      action: actionHint,
+    };
+  });
+}
+
 function ScreenerContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -293,68 +338,53 @@ function ScreenerContent() {
     ? initialPageSizeValue
     : DEFAULT_ITEMS_PER_PAGE;
   const initialPageValue = Number(searchParams.get('page'));
-  const initialPage = Number.isInteger(initialPageValue) && initialPageValue > 0
-    ? initialPageValue - 1
-    : 0;
+  const initialPage = Number.isInteger(initialPageValue) && initialPageValue > 0 ? initialPageValue - 1 : 0;
 
   const initialLookbackDaysValue = Number(searchParams.get('days'));
   const initialLookbackDays = LOOKBACK_DAYS_OPTIONS.some((option) => option === initialLookbackDaysValue)
     ? initialLookbackDaysValue
     : DEFAULT_LOOKBACK_DAYS;
 
-  const initialPivotLeft = Number(searchParams.get('pivot_left')) || DEFAULT_PIVOT_LEFT_WINDOW;
-  const initialConfirmedMin = Number(searchParams.get('conf_min')) || DEFAULT_CONFIRMED_RIGHT_MIN;
-  const initialConfirmedMax = Number(searchParams.get('conf_max')) || DEFAULT_CONFIRMED_RIGHT_MAX;
-  const initialAggressiveMin = Number(searchParams.get('agg_min')) || DEFAULT_AGGRESSIVE_RIGHT_MIN;
-  const initialAggressiveMax = Number(searchParams.get('agg_max')) || DEFAULT_AGGRESSIVE_RIGHT_MAX;
-  const initialAuditMode = toBooleanQueryValue(searchParams.get('audit'));
+  const initialPivotLeft = parseBoundedInteger(searchParams.get('pivot_left'), DEFAULT_PIVOT_LEFT_WINDOW, 1, 20);
+  const initialConfirmedMin = parseBoundedInteger(searchParams.get('conf_min'), DEFAULT_CONFIRMED_RIGHT_MIN, 0, 10);
+  const initialConfirmedMax = parseBoundedInteger(searchParams.get('conf_max'), DEFAULT_CONFIRMED_RIGHT_MAX, 0, 10);
+  const initialAggressiveMin = parseBoundedInteger(searchParams.get('agg_min'), DEFAULT_AGGRESSIVE_RIGHT_MIN, 0, 10);
+  const initialAggressiveMax = parseBoundedInteger(searchParams.get('agg_max'), DEFAULT_AGGRESSIVE_RIGHT_MAX, 0, 10);
+  const initialAuditMode = parseBooleanParam(searchParams.get('audit'), false);
 
   const initialTriangleTypeFilter = toTriangleTypeFilter(searchParams.get('tri_type'));
   const initialTriangleStateFilter = toTriangleStateFilter(searchParams.get('tri_state'));
   const initialTriangleDirectionFilter = toTriangleDirectionFilter(searchParams.get('tri_dir'));
-  const initialTriangleMinConfidence = toBoundedInteger(
+  const initialTriangleMinConfidence = parseBoundedInteger(
     searchParams.get('tri_min_conf'),
     DEFAULT_TRIANGLE_MIN_CONFIDENCE,
     0,
     100,
   );
-  const rawTrianglePotential = searchParams.get('tri_potential');
-  const rawTriangleBreakout = searchParams.get('tri_breakout');
-  const initialTriangleIncludePotential = rawTrianglePotential === null
-    ? true
-    : toBooleanQueryValue(rawTrianglePotential);
-  const initialTriangleIncludeBreakouts = rawTriangleBreakout === null
-    ? true
-    : toBooleanQueryValue(rawTriangleBreakout);
-  const initialTriangleLookbackBars = toBoundedInteger(
+  const initialTriangleIncludePotential = parseBooleanParam(searchParams.get('tri_potential'), true);
+  const initialTriangleIncludeBreakouts = parseBooleanParam(searchParams.get('tri_breakout'), true);
+  const initialTriangleLookbackBars = parseBoundedInteger(
     searchParams.get('tri_lookback'),
     DEFAULT_TRIANGLE_LOOKBACK_BARS,
     30,
     180,
   );
-  const initialTrianglePivotLeft = toBoundedInteger(
+  const initialTrianglePivotLeft = parseBoundedInteger(
     searchParams.get('tri_left'),
     DEFAULT_TRIANGLE_PIVOT_LEFT,
     1,
     10,
   );
-  const initialTrianglePivotRight = toBoundedInteger(
+  const initialTrianglePivotRight = parseBoundedInteger(
     searchParams.get('tri_right'),
     DEFAULT_TRIANGLE_PIVOT_RIGHT,
     0,
     10,
   );
-  const initialTriangleBreakoutRelaxed = toBooleanQueryValue(searchParams.get('tri_breakout_relaxed'));
+  const initialTriangleBreakoutRelaxed = parseBooleanParam(searchParams.get('tri_breakout_relaxed'), false);
   const initialTriangleIndexCode = normalizeIndexCode(searchParams.get('tri_index') || '');
 
   const [mode, setMode] = useState<ScreenerMode>(initialMode);
-
-  const [divergenceResults, setDivergenceResults] = useState<DivergenceScreenerItem[]>([]);
-  const [triangleResults, setTriangleResults] = useState<TriangleScreenerItem[]>([]);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>('all');
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('all');
@@ -362,7 +392,8 @@ function ScreenerContent() {
 
   const [triangleTypeFilter, setTriangleTypeFilter] = useState<TriangleTypeFilter>(initialTriangleTypeFilter);
   const [triangleStateFilter, setTriangleStateFilter] = useState<TriangleStateFilter>(initialTriangleStateFilter);
-  const [triangleDirectionFilter, setTriangleDirectionFilter] = useState<TriangleDirectionFilter>(initialTriangleDirectionFilter);
+  const [triangleDirectionFilter, setTriangleDirectionFilter] =
+    useState<TriangleDirectionFilter>(initialTriangleDirectionFilter);
   const [triangleMinConfidence, setTriangleMinConfidence] = useState(initialTriangleMinConfidence);
 
   const [itemsPerPage, setItemsPerPage] = useState(initialItemsPerPage);
@@ -388,221 +419,103 @@ function ScreenerContent() {
     return resolveTriangleState(triangleIncludePotential, triangleIncludeBreakouts, triangleStateFilter);
   }, [triangleIncludePotential, triangleIncludeBreakouts, triangleStateFilter]);
 
-  const buildTriangleTickerHref = useCallback((symbol: string) => {
-    const params = new URLSearchParams();
-    params.set('mode', 'triangle');
+  const buildTriangleTickerHref = useCallback(
+    (symbol: string) => {
+      const params = new URLSearchParams();
+      params.set('mode', 'triangle');
 
-    if (triangleTypeFilter !== 'all') params.set('tri_type', triangleTypeFilter);
-    if (triangleStateFilter !== 'all') params.set('tri_state', triangleStateFilter);
-    if (triangleDirectionFilter !== 'all') params.set('tri_dir', triangleDirectionFilter);
-    if (triangleMinConfidence !== DEFAULT_TRIANGLE_MIN_CONFIDENCE) {
-      params.set('tri_min_conf', String(triangleMinConfidence));
-    }
-    if (!triangleIncludePotential) params.set('tri_potential', '0');
-    if (!triangleIncludeBreakouts) params.set('tri_breakout', '0');
-    if (triangleLookbackBars !== DEFAULT_TRIANGLE_LOOKBACK_BARS) {
-      params.set('tri_lookback', String(triangleLookbackBars));
-    }
-    if (trianglePivotLeftWindow !== DEFAULT_TRIANGLE_PIVOT_LEFT) {
-      params.set('tri_left', String(trianglePivotLeftWindow));
-    }
-    if (trianglePivotRightWindow !== DEFAULT_TRIANGLE_PIVOT_RIGHT) {
-      params.set('tri_right', String(trianglePivotRightWindow));
-    }
-    if (triangleBreakoutRelaxed) params.set('tri_breakout_relaxed', '1');
+      if (triangleTypeFilter !== 'all') params.set('tri_type', triangleTypeFilter);
+      if (triangleStateFilter !== 'all') params.set('tri_state', triangleStateFilter);
+      if (triangleDirectionFilter !== 'all') params.set('tri_dir', triangleDirectionFilter);
+      if (triangleMinConfidence !== DEFAULT_TRIANGLE_MIN_CONFIDENCE) {
+        params.set('tri_min_conf', String(triangleMinConfidence));
+      }
+      if (!triangleIncludePotential) params.set('tri_potential', '0');
+      if (!triangleIncludeBreakouts) params.set('tri_breakout', '0');
+      if (triangleLookbackBars !== DEFAULT_TRIANGLE_LOOKBACK_BARS) {
+        params.set('tri_lookback', String(triangleLookbackBars));
+      }
+      if (trianglePivotLeftWindow !== DEFAULT_TRIANGLE_PIVOT_LEFT) {
+        params.set('tri_left', String(trianglePivotLeftWindow));
+      }
+      if (trianglePivotRightWindow !== DEFAULT_TRIANGLE_PIVOT_RIGHT) {
+        params.set('tri_right', String(trianglePivotRightWindow));
+      }
+      if (triangleBreakoutRelaxed) params.set('tri_breakout_relaxed', '1');
 
-    const normalizedIndexCode = normalizeIndexCode(triangleIndexCode);
-    if (normalizedIndexCode) {
-      params.set('tri_index', normalizedIndexCode);
-    }
+      const normalizedIndexCode = normalizeIndexCode(triangleIndexCode);
+      if (normalizedIndexCode) {
+        params.set('tri_index', normalizedIndexCode);
+      }
 
-    return `/tickers/${symbol}?${params.toString()}`;
-  }, [
-    triangleTypeFilter,
-    triangleStateFilter,
-    triangleDirectionFilter,
-    triangleMinConfidence,
-    triangleIncludePotential,
-    triangleIncludeBreakouts,
-    triangleLookbackBars,
-    trianglePivotLeftWindow,
-    trianglePivotRightWindow,
-    triangleBreakoutRelaxed,
-    triangleIndexCode,
-  ]);
-
-  const loadDivergenceSignals = useCallback(async (refresh = false) => {
-    if (refresh) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-    setError(null);
-
-    try {
-      const params: DivergenceConfigParams = {
-        pivot_left_window: pivotLeftWindow,
-        confirmed_right_min: confirmedRightMin,
-        confirmed_right_max: confirmedRightMax,
-        aggressive_right_min: aggressiveRightMin,
-        aggressive_right_max: aggressiveRightMax,
-        include_invalidated: includeInvalidated,
-      };
-      const response = await getDivergenceScreener(lookbackDays, params);
-      const normalizedResults = response.results.map((item) => {
-        const itemWithAliases = item as DivergenceScreenerItem & DivergenceItemAliases;
-        const signalType = normalizeSignalType(
-          firstDefined(
-            itemWithAliases.type,
-            itemWithAliases.divergence_type,
-            itemWithAliases.logic_type,
-            itemWithAliases.signal_type,
-          )
-        );
-        const grade = normalizeGrade(
-          firstDefined(
-            itemWithAliases.grade,
-            itemWithAliases.grade_type,
-            itemWithAliases.signal_grade,
-          )
-        );
-        const strategyType = normalizeStrategyType(
-          firstDefined(
-            itemWithAliases.strategy_type,
-            itemWithAliases.strategy,
-            itemWithAliases.strategy_name,
-            itemWithAliases.strategyType,
-          )
-        );
-
-        const signalTimestamp = typeof (item as { signal_timestamp?: unknown }).signal_timestamp === 'number'
-          ? Number((item as { signal_timestamp: number }).signal_timestamp)
-          : (
-            typeof item.confirmation_timestamp === 'number'
-              ? Number(item.confirmation_timestamp)
-              : Number(item.p2.timestamp)
-          );
-
-        const invalidationLevel = typeof (item as { invalidation_level?: unknown }).invalidation_level === 'number'
-          ? Number((item as { invalidation_level: number }).invalidation_level)
-          : null;
-
-        const isInvalidated = typeof (item as { is_invalidated?: unknown }).is_invalidated === 'boolean'
-          ? Boolean((item as { is_invalidated: boolean }).is_invalidated)
-          : false;
-
-        const inferredStrategyType = strategyType
-          ?? (invalidationLevel !== null ? 'BULLISH_AGGRESSIVE' : 'BULLISH_CONFIRMED');
-
-        const inferredGrade = grade
-          ?? (
-            inferredStrategyType === 'BULLISH_AGGRESSIVE' && item.p2.rsi_14 <= 30
-              ? 'oversold'
-              : 'neutral'
-          );
-
-        const actionHint = typeof (item as { action?: unknown }).action === 'string'
-          ? String((item as { action: string }).action)
-          : (inferredStrategyType === 'BULLISH_AGGRESSIVE'
-              ? 'Potential Bottom - Monitor for Open Entry.'
-              : 'Confirmed divergence setup');
-
-        return {
-          ...item,
-          type: signalType ?? 'regular',
-          strategy_type: inferredStrategyType,
-          grade: inferredGrade,
-          signal_timestamp: signalTimestamp,
-          invalidation_level: invalidationLevel,
-          is_invalidated: isInvalidated,
-          action: actionHint,
-        };
-      });
-
-      setDivergenceResults(normalizedResults);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load divergence screener');
-      setDivergenceResults([]);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [lookbackDays, pivotLeftWindow, confirmedRightMin, confirmedRightMax, aggressiveRightMin, aggressiveRightMax, includeInvalidated]);
-
-  const loadTriangleSignals = useCallback(async (refresh = false) => {
-    if (refresh) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-    setError(null);
-
-    const resolvedState = resolveTriangleState(
+      return `/tickers/${symbol}?${params.toString()}`;
+    },
+    [
+      triangleTypeFilter,
+      triangleStateFilter,
+      triangleDirectionFilter,
+      triangleMinConfidence,
       triangleIncludePotential,
       triangleIncludeBreakouts,
-      triangleStateFilter,
-    );
+      triangleLookbackBars,
+      trianglePivotLeftWindow,
+      trianglePivotRightWindow,
+      triangleBreakoutRelaxed,
+      triangleIndexCode,
+    ],
+  );
 
-    if (resolvedState === null) {
-      setTriangleResults([]);
-      setIsLoading(false);
-      setIsRefreshing(false);
-      return;
-    }
+  // Screener calls are slow, so results are cached per parameter set (see lib/queries.ts); changing a
+  // parameter fetches (or reuses) the matching result, and a request that is no longer needed is cancelled.
+  const divergenceParams: DivergenceConfigParams = {
+    pivot_left_window: pivotLeftWindow,
+    confirmed_right_min: confirmedRightMin,
+    confirmed_right_max: confirmedRightMax,
+    aggressive_right_min: aggressiveRightMin,
+    aggressive_right_max: aggressiveRightMax,
+    include_invalidated: includeInvalidated,
+  };
+  const divergenceQuery = useQuery({
+    ...divergenceScreenerQuery(lookbackDays, divergenceParams),
+    enabled: mode === 'divergence',
+    select: normalizeDivergenceResults,
+  });
 
+  const triangleParams: TriangleConfigParams = {
+    lookback_bars: triangleLookbackBars,
+    pivot_left_window: trianglePivotLeftWindow,
+    pivot_right_window: trianglePivotRightWindow,
+    breakout_relaxed: triangleBreakoutRelaxed,
+    triangle_types: triangleTypeFilter === 'all' ? undefined : [triangleTypeFilter],
+    direction: triangleDirectionFilter,
+    min_confidence: triangleMinConfidence,
+    state: effectiveTriangleState === null || effectiveTriangleState === 'all' ? undefined : effectiveTriangleState,
+    index_code: normalizeIndexCode(triangleIndexCode) || undefined,
+    limit: 500,
+  };
+  // Neither "potential" nor "breakout" selected: nothing to ask the server for.
+  const triangleQuery = useQuery({
+    ...triangleScreenerQuery(lookbackDays, triangleParams),
+    enabled: mode === 'triangle' && effectiveTriangleState !== null,
+  });
+
+  const divergenceResults = divergenceQuery.data ?? EMPTY_DIVERGENCE_RESULTS;
+  const triangleResults = triangleQuery.data?.results ?? EMPTY_TRIANGLE_RESULTS;
+
+  const activeQuery = mode === 'divergence' ? divergenceQuery : triangleQuery;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // "Apply" refetches without swapping the table for the loading state; parameter changes show it.
+  const isLoading = activeQuery.isFetching && !isRefreshing;
+  const error = activeQuery.error ? activeQuery.error.message : null;
+
+  const handleApply = async () => {
+    setIsRefreshing(true);
     try {
-      const params: TriangleConfigParams = {
-        lookback_bars: triangleLookbackBars,
-        pivot_left_window: trianglePivotLeftWindow,
-        pivot_right_window: trianglePivotRightWindow,
-        breakout_relaxed: triangleBreakoutRelaxed,
-        triangle_types: triangleTypeFilter === 'all' ? undefined : [triangleTypeFilter],
-        direction: triangleDirectionFilter,
-        min_confidence: triangleMinConfidence,
-        state: resolvedState === 'all' ? undefined : resolvedState,
-        index_code: normalizeIndexCode(triangleIndexCode) || undefined,
-        limit: 500,
-      };
-
-      const response = await getTriangleScreener(lookbackDays, params);
-      setTriangleResults(response.results);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load triangle screener');
-      setTriangleResults([]);
+      await activeQuery.refetch();
     } finally {
-      setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [
-    lookbackDays,
-    triangleIncludePotential,
-    triangleIncludeBreakouts,
-    triangleStateFilter,
-    triangleLookbackBars,
-    trianglePivotLeftWindow,
-    trianglePivotRightWindow,
-    triangleBreakoutRelaxed,
-    triangleTypeFilter,
-    triangleDirectionFilter,
-    triangleMinConfidence,
-    triangleIndexCode,
-  ]);
-
-  useEffect(() => {
-    if (mode !== 'divergence') {
-      return;
-    }
-
-    void loadDivergenceSignals();
-  }, [mode, loadDivergenceSignals]);
-
-  useEffect(() => {
-    if (mode !== 'triangle') {
-      return;
-    }
-
-    void loadTriangleSignals();
-  }, [mode, loadTriangleSignals]);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -626,12 +539,16 @@ function ScreenerContent() {
       if (triangleTypeFilter !== 'all') params.set('tri_type', triangleTypeFilter);
       if (triangleStateFilter !== 'all') params.set('tri_state', triangleStateFilter);
       if (triangleDirectionFilter !== 'all') params.set('tri_dir', triangleDirectionFilter);
-      if (triangleMinConfidence !== DEFAULT_TRIANGLE_MIN_CONFIDENCE) params.set('tri_min_conf', String(triangleMinConfidence));
+      if (triangleMinConfidence !== DEFAULT_TRIANGLE_MIN_CONFIDENCE)
+        params.set('tri_min_conf', String(triangleMinConfidence));
       if (!triangleIncludePotential) params.set('tri_potential', '0');
       if (!triangleIncludeBreakouts) params.set('tri_breakout', '0');
-      if (triangleLookbackBars !== DEFAULT_TRIANGLE_LOOKBACK_BARS) params.set('tri_lookback', String(triangleLookbackBars));
-      if (trianglePivotLeftWindow !== DEFAULT_TRIANGLE_PIVOT_LEFT) params.set('tri_left', String(trianglePivotLeftWindow));
-      if (trianglePivotRightWindow !== DEFAULT_TRIANGLE_PIVOT_RIGHT) params.set('tri_right', String(trianglePivotRightWindow));
+      if (triangleLookbackBars !== DEFAULT_TRIANGLE_LOOKBACK_BARS)
+        params.set('tri_lookback', String(triangleLookbackBars));
+      if (trianglePivotLeftWindow !== DEFAULT_TRIANGLE_PIVOT_LEFT)
+        params.set('tri_left', String(trianglePivotLeftWindow));
+      if (trianglePivotRightWindow !== DEFAULT_TRIANGLE_PIVOT_RIGHT)
+        params.set('tri_right', String(trianglePivotRightWindow));
       if (triangleBreakoutRelaxed) params.set('tri_breakout_relaxed', '1');
       if (normalizeIndexCode(triangleIndexCode)) params.set('tri_index', normalizeIndexCode(triangleIndexCode));
     }
@@ -725,26 +642,18 @@ function ScreenerContent() {
 
       return true;
     });
-  }, [
-    effectiveTriangleState,
-    triangleResults,
-    triangleTypeFilter,
-    triangleDirectionFilter,
-    triangleMinConfidence,
-  ]);
+  }, [effectiveTriangleState, triangleResults, triangleTypeFilter, triangleDirectionFilter, triangleMinConfidence]);
 
-  const activeFilteredCount = mode === 'divergence'
-    ? filteredDivergenceResults.length
-    : filteredTriangleResults.length;
+  const activeFilteredCount = mode === 'divergence' ? filteredDivergenceResults.length : filteredTriangleResults.length;
 
-  useEffect(() => {
-    if (isLoading) {
-      return;
-    }
-
+  // Keep the page inside the filtered result count. Adjusting state while rendering is React's
+  // recommended alternative to an effect for derived state.
+  if (!isLoading) {
     const maxPage = Math.max(0, Math.ceil(activeFilteredCount / itemsPerPage) - 1);
-    setPage((currentPage) => (currentPage > maxPage ? maxPage : currentPage));
-  }, [activeFilteredCount, itemsPerPage, isLoading]);
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }
 
   const paginatedDivergenceResults = useMemo(() => {
     const start = page * itemsPerPage;
@@ -762,9 +671,7 @@ function ScreenerContent() {
   };
 
   const handleItemsPerPageChange = (value: number) => {
-    const nextItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === value)
-      ? value
-      : DEFAULT_ITEMS_PER_PAGE;
+    const nextItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === value) ? value : DEFAULT_ITEMS_PER_PAGE;
 
     setItemsPerPage(nextItemsPerPage);
     setPage(0);
@@ -799,7 +706,6 @@ function ScreenerContent() {
 
     setMode(nextMode);
     setPage(0);
-    setError(null);
   };
 
   const regularCount = divergenceResults.filter((item) => item.type === 'regular').length;
@@ -817,7 +723,7 @@ function ScreenerContent() {
   const triangleHighConfidenceCount = triangleResults.filter((item) => item.confidence_level === 'high').length;
 
   const totalPages = Math.ceil(activeFilteredCount / itemsPerPage);
-  const visibleStart = activeFilteredCount === 0 ? 0 : (page * itemsPerPage) + 1;
+  const visibleStart = activeFilteredCount === 0 ? 0 : page * itemsPerPage + 1;
   const visibleEnd = Math.min((page + 1) * itemsPerPage, activeFilteredCount);
 
   return (
@@ -880,15 +786,21 @@ function ScreenerContent() {
             </div>
             <div className="hud-panel p-4">
               <p className="text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">Confirmed</p>
-              <p className="mt-2 text-2xl font-semibold" style={{ color: '#EC4899' }}>{confirmedCount}</p>
+              <p className="mt-2 text-2xl font-semibold" style={{ color: '#EC4899' }}>
+                {confirmedCount}
+              </p>
             </div>
             <div className="hud-panel p-4">
               <p className="text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">Aggressive</p>
-              <p className="mt-2 text-2xl font-semibold" style={{ color: '#FFBF00' }}>{aggressiveCount}</p>
+              <p className="mt-2 text-2xl font-semibold" style={{ color: '#FFBF00' }}>
+                {aggressiveCount}
+              </p>
             </div>
             <div className="hud-panel p-4">
               <p className="text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">Emerging</p>
-              <p className="mt-2 text-2xl font-semibold" style={{ color: '#9333EA' }}>{emergingCount}</p>
+              <p className="mt-2 text-2xl font-semibold" style={{ color: '#9333EA' }}>
+                {emergingCount}
+              </p>
               {includeInvalidated ? (
                 <p className="mt-1 text-xs text-gemini-text-tertiary">Invalidated: {invalidatedCount}</p>
               ) : null}
@@ -926,14 +838,19 @@ function ScreenerContent() {
         {mode === 'divergence' ? (
           <section className="hud-panel p-5">
             <div className="mb-4">
-              <h3 className="mb-2 text-sm uppercase tracking-[0.14em] text-gemini-text-tertiary">Detection Parameters</h3>
+              <h3 className="mb-2 text-sm uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                Detection Parameters
+              </h3>
               <p className="text-xs text-gemini-text-secondary">
                 Adjust pivot window settings. Higher right windows = stronger confirmation but later signals.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label htmlFor="pivotLeftWindow" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="pivotLeftWindow"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Pivot Left Window
                 </label>
                 <input
@@ -948,7 +865,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="confirmedRightMin" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="confirmedRightMin"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Confirmed Min
                 </label>
                 <input
@@ -963,7 +883,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="confirmedRightMax" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="confirmedRightMax"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Confirmed Max
                 </label>
                 <input
@@ -978,7 +901,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="aggressiveRightMin" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="aggressiveRightMin"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Aggressive Min
                 </label>
                 <input
@@ -993,7 +919,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="aggressiveRightMax" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="aggressiveRightMax"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Aggressive Max
                 </label>
                 <input
@@ -1007,18 +936,11 @@ function ScreenerContent() {
                 />
               </div>
 
-              <button
-                onClick={handleResetDivergenceDefaults}
-                className="gemini-button px-4 py-2 text-sm"
-              >
+              <button onClick={handleResetDivergenceDefaults} className="gemini-button px-4 py-2 text-sm">
                 Reset Defaults
               </button>
 
-              <button
-                onClick={() => loadDivergenceSignals(true)}
-                className="gemini-button-primary px-4 py-2 text-sm"
-                disabled={isRefreshing}
-              >
+              <button onClick={handleApply} className="gemini-button-primary px-4 py-2 text-sm" disabled={isRefreshing}>
                 {isRefreshing ? 'Applying...' : 'Apply'}
               </button>
             </div>
@@ -1026,14 +948,20 @@ function ScreenerContent() {
         ) : (
           <section className="hud-panel p-5">
             <div className="mb-4">
-              <h3 className="mb-2 text-sm uppercase tracking-[0.14em] text-gemini-text-tertiary">Triangle Detector Settings</h3>
+              <h3 className="mb-2 text-sm uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                Triangle Detector Settings
+              </h3>
               <p className="text-xs text-gemini-text-secondary">
-                Tune the window and pivot configuration. Narrower windows produce more signals, broader windows are stricter.
+                Tune the window and pivot configuration. Narrower windows produce more signals, broader windows are
+                stricter.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label htmlFor="triangleLookback" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleLookback"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Lookback Bars
                 </label>
                 <input
@@ -1048,7 +976,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="trianglePivotLeft" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="trianglePivotLeft"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Pivot Left
                 </label>
                 <input
@@ -1063,7 +994,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="trianglePivotRight" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="trianglePivotRight"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Pivot Right
                 </label>
                 <input
@@ -1078,7 +1012,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleIndexCode" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleIndexCode"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Index Code (Optional)
                 </label>
                 <input
@@ -1091,18 +1028,11 @@ function ScreenerContent() {
                 />
               </div>
 
-              <button
-                onClick={handleResetTriangleDefaults}
-                className="gemini-button px-4 py-2 text-sm"
-              >
+              <button onClick={handleResetTriangleDefaults} className="gemini-button px-4 py-2 text-sm">
                 Reset Defaults
               </button>
 
-              <button
-                onClick={() => loadTriangleSignals(true)}
-                className="gemini-button-primary px-4 py-2 text-sm"
-                disabled={isRefreshing}
-              >
+              <button onClick={handleApply} className="gemini-button-primary px-4 py-2 text-sm" disabled={isRefreshing}>
                 {isRefreshing ? 'Applying...' : 'Apply'}
               </button>
             </div>
@@ -1113,7 +1043,10 @@ function ScreenerContent() {
           <section className="hud-panel p-5">
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label htmlFor="strategyFilter" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="strategyFilter"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Strategy
                 </label>
                 <select
@@ -1130,7 +1063,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="signalFilter" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="signalFilter"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Signal Type
                 </label>
                 <select
@@ -1146,7 +1082,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="gradeFilter" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="gradeFilter"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Grade
                 </label>
                 <select
@@ -1162,7 +1101,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="auditMode" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="auditMode"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Audit Mode
                 </label>
                 <button
@@ -1179,7 +1121,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="lookbackDays" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="lookbackDays"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Lookback
                 </label>
                 <select
@@ -1197,7 +1142,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="itemsPerPage" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="itemsPerPage"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Items / Page
                 </label>
                 <select
@@ -1220,7 +1168,10 @@ function ScreenerContent() {
           <section className="hud-panel p-5">
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label htmlFor="triangleTypeFilter" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleTypeFilter"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Triangle Type
                 </label>
                 <select
@@ -1237,7 +1188,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleStateFilter" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleStateFilter"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   State
                 </label>
                 <select
@@ -1253,7 +1207,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleDirectionFilter" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleDirectionFilter"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Direction
                 </label>
                 <select
@@ -1269,7 +1226,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleMinConfidence" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleMinConfidence"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Min Confidence
                 </label>
                 <input
@@ -1284,7 +1244,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleIncludePotential" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleIncludePotential"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Include Potential
                 </label>
                 <button
@@ -1301,7 +1264,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleIncludeBreakouts" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleIncludeBreakouts"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Include Breakouts
                 </label>
                 <button
@@ -1318,7 +1284,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="triangleBreakoutRelaxed" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="triangleBreakoutRelaxed"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Breakout Mode
                 </label>
                 <button
@@ -1335,7 +1304,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="lookbackDaysTriangle" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="lookbackDaysTriangle"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Lookback
                 </label>
                 <select
@@ -1353,7 +1325,10 @@ function ScreenerContent() {
               </div>
 
               <div>
-                <label htmlFor="itemsPerPageTriangle" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                <label
+                  htmlFor="itemsPerPageTriangle"
+                  className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary"
+                >
                   Items / Page
                 </label>
                 <select
@@ -1407,12 +1382,18 @@ function ScreenerContent() {
                   </thead>
                   <tbody className="divide-y divide-gemini-surface-border/35">
                     {paginatedDivergenceResults.map((item) => (
-                      <tr key={`${item.symbol}-${item.strategy_type}-${item.type}-${item.p1.timestamp}-${item.p2.timestamp}-${item.signal_timestamp}`} className="hover:bg-gemini-surface-hover/55">
+                      <tr
+                        key={`${item.symbol}-${item.strategy_type}-${item.type}-${item.p1.timestamp}-${item.p2.timestamp}-${item.signal_timestamp}`}
+                        className="hover:bg-gemini-surface-hover/55"
+                      >
                         <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
                           {formatTimestamp(item.signal_timestamp)}
                         </td>
                         <td className="px-5 py-3 whitespace-nowrap">
-                          <Link href={buildTriangleTickerHref(item.symbol)} className="font-semibold text-gemini-accent-blue hover:text-gemini-accent-cyan">
+                          <Link
+                            href={buildTriangleTickerHref(item.symbol)}
+                            className="font-semibold text-gemini-accent-blue hover:text-gemini-accent-cyan"
+                          >
                             {item.symbol}
                           </Link>
                           <p className="mt-0.5 text-xs text-gemini-text-tertiary">{item.name}</p>
@@ -1422,28 +1403,29 @@ function ScreenerContent() {
                             <span
                               className="gemini-badge"
                               style={{
-                                color: item.strategy_type === 'BULLISH_AGGRESSIVE' 
-                                  ? '#FFBF00' 
-                                  : item.strategy_type === 'BULLISH_EMERGING'
-                                  ? '#9333EA'
-                                  : undefined,
+                                color:
+                                  item.strategy_type === 'BULLISH_AGGRESSIVE'
+                                    ? '#FFBF00'
+                                    : item.strategy_type === 'BULLISH_EMERGING'
+                                      ? '#9333EA'
+                                      : undefined,
                               }}
                             >
-                              {item.strategy_type === 'BULLISH_AGGRESSIVE' 
-                                ? 'Aggressive' 
+                              {item.strategy_type === 'BULLISH_AGGRESSIVE'
+                                ? 'Aggressive'
                                 : item.strategy_type === 'BULLISH_EMERGING'
-                                ? 'Emerging'
-                                : 'Confirmed'}
+                                  ? 'Emerging'
+                                  : 'Confirmed'}
                             </span>
                             {item.is_invalidated ? (
-                              <span className="gemini-badge text-gemini-accent-red">
-                                Invalidated
-                              </span>
+                              <span className="gemini-badge text-gemini-accent-red">Invalidated</span>
                             ) : null}
                           </div>
                         </td>
                         <td className="px-5 py-3 whitespace-nowrap">
-                          <span className={`gemini-badge ${item.type === 'regular' ? 'text-gemini-accent-green' : 'text-gemini-accent-cyan'}`}>
+                          <span
+                            className={`gemini-badge ${item.type === 'regular' ? 'text-gemini-accent-green' : 'text-gemini-accent-cyan'}`}
+                          >
                             {item.type}
                           </span>
                         </td>
@@ -1473,93 +1455,93 @@ function ScreenerContent() {
                 </table>
               </div>
             )
+          ) : filteredTriangleResults.length === 0 ? (
+            <div className="p-10 text-center text-gemini-text-secondary">No triangle signals match this filter.</div>
           ) : (
-            filteredTriangleResults.length === 0 ? (
-              <div className="p-10 text-center text-gemini-text-secondary">
-                No triangle signals match this filter.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="gemini-table min-w-full">
-                  <thead className="bg-gemini-bg-secondary/85">
-                    <tr>
-                      <th className="px-5 py-3">Signal Date</th>
-                      <th className="px-5 py-3">Symbol</th>
-                      <th className="px-5 py-3">Triangle Type</th>
-                      <th className="px-5 py-3">State</th>
-                      <th className="px-5 py-3">Direction</th>
-                      <th className="px-5 py-3">Confidence</th>
-                      <th className="px-5 py-3">Touches (U/L/T)</th>
-                      <th className="px-5 py-3">Breakout Closes</th>
-                      <th className="px-5 py-3">Volume Ratio</th>
-                      <th className="px-5 py-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gemini-surface-border/35">
-                    {paginatedTriangleResults.map((item) => (
-                      <tr key={`${item.symbol}-${item.triangle_type}-${item.state}-${item.signal_timestamp}-${item.confidence_score}`} className="hover:bg-gemini-surface-hover/55">
-                        <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
-                          {formatTimestamp(item.signal_timestamp)}
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <Link href={buildTriangleTickerHref(item.symbol)} className="font-semibold text-gemini-accent-blue hover:text-gemini-accent-cyan">
-                            {item.symbol}
-                          </Link>
-                          <p className="mt-0.5 text-xs text-gemini-text-tertiary">{item.name}</p>
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <span className="gemini-badge text-gemini-accent-cyan">
-                            {formatTriangleType(item.triangle_type)}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <span
-                            className={`gemini-badge ${
-                              item.state === 'breakout' ? 'text-gemini-accent-green' : 'text-gemini-accent-cyan'
-                            }`}
-                          >
-                            {item.state}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
-                          {formatBreakoutDirection(item.breakout_direction)}
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap">
-                          <span
-                            className={`gemini-badge ${
-                              item.confidence_level === 'high'
-                                ? 'text-gemini-accent-green'
-                                : (item.confidence_level === 'medium'
-                                    ? 'text-gemini-accent-orange'
-                                    : 'text-gemini-text-secondary')
-                            }`}
-                          >
-                            {item.confidence_level} ({item.confidence_score})
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
-                          {item.upper_touch_count} / {item.lower_touch_count} / {item.total_touch_count}
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
-                          {item.breakout_close_count}
-                        </td>
-                        <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
-                          {item.volume_ratio !== null
-                            ? item.volume_ratio.toLocaleString('en-US', {
+            <div className="overflow-x-auto">
+              <table className="gemini-table min-w-full">
+                <thead className="bg-gemini-bg-secondary/85">
+                  <tr>
+                    <th className="px-5 py-3">Signal Date</th>
+                    <th className="px-5 py-3">Symbol</th>
+                    <th className="px-5 py-3">Triangle Type</th>
+                    <th className="px-5 py-3">State</th>
+                    <th className="px-5 py-3">Direction</th>
+                    <th className="px-5 py-3">Confidence</th>
+                    <th className="px-5 py-3">Touches (U/L/T)</th>
+                    <th className="px-5 py-3">Breakout Closes</th>
+                    <th className="px-5 py-3">Volume Ratio</th>
+                    <th className="px-5 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gemini-surface-border/35">
+                  {paginatedTriangleResults.map((item) => (
+                    <tr
+                      key={`${item.symbol}-${item.triangle_type}-${item.state}-${item.signal_timestamp}-${item.confidence_score}`}
+                      className="hover:bg-gemini-surface-hover/55"
+                    >
+                      <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
+                        {formatTimestamp(item.signal_timestamp)}
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        <Link
+                          href={buildTriangleTickerHref(item.symbol)}
+                          className="font-semibold text-gemini-accent-blue hover:text-gemini-accent-cyan"
+                        >
+                          {item.symbol}
+                        </Link>
+                        <p className="mt-0.5 text-xs text-gemini-text-tertiary">{item.name}</p>
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        <span className="gemini-badge text-gemini-accent-cyan">
+                          {formatTriangleType(item.triangle_type)}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        <span
+                          className={`gemini-badge ${
+                            item.state === 'breakout' ? 'text-gemini-accent-green' : 'text-gemini-accent-cyan'
+                          }`}
+                        >
+                          {item.state}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
+                        {formatBreakoutDirection(item.breakout_direction)}
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        <span
+                          className={`gemini-badge ${
+                            item.confidence_level === 'high'
+                              ? 'text-gemini-accent-green'
+                              : item.confidence_level === 'medium'
+                                ? 'text-gemini-accent-orange'
+                                : 'text-gemini-text-secondary'
+                          }`}
+                        >
+                          {item.confidence_level} ({item.confidence_score})
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
+                        {item.upper_touch_count} / {item.lower_touch_count} / {item.total_touch_count}
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
+                        {item.breakout_close_count}
+                      </td>
+                      <td className="px-5 py-3 whitespace-nowrap text-gemini-text-secondary">
+                        {item.volume_ratio !== null
+                          ? item.volume_ratio.toLocaleString('en-US', {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })
-                            : '-'}
-                        </td>
-                        <td className="px-5 py-3 text-gemini-text-secondary">
-                          {item.action}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
+                          : '-'}
+                      </td>
+                      <td className="px-5 py-3 text-gemini-text-secondary">{item.action}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
 
