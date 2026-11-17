@@ -1,13 +1,21 @@
-import multiprocessing
-from datetime import datetime
+import logging
+import subprocess
+import sys
+from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.database import get_db
 from app.models import Index, SyncJob, Ticker
 from app.services.data_sync import DataSyncService
+from app.sync.runner import ACTIVE_STATUSES, create_job, recover_stale_jobs
+
+logger = logging.getLogger(__name__)
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -24,9 +32,20 @@ def _resolve_sync_job(db: Session, sync_id: Optional[str]) -> Optional[SyncJob]:
     )
 
 
+def _spawn_sync_worker(sync_id: str, start_date: Optional[str]) -> None:
+    """Start the sync worker as its own process (never a pool inside the web process).
+
+    start_new_session detaches it from the API's process group, so an API reload or restart
+    does not kill a running sync.
+    """
+    cmd = [sys.executable, "-m", "app.sync", "run", "--sync-id", sync_id]
+    if start_date:
+        cmd += ["--start-date", start_date]
+    subprocess.Popen(cmd, cwd=BACKEND_DIR, stdin=subprocess.DEVNULL, start_new_session=True)
+
+
 @router.post("/start")
 def start_sync(
-    background_tasks: BackgroundTasks,
     index_code: str = Query(..., description="Index code to sync (e.g., JCI)"),
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     db: Session = Depends(get_db),
@@ -34,40 +53,50 @@ def start_sync(
     """
     Start a sync job for all tickers in an index.
 
-    This will first update the ticker list from the remote source,
-    then sync price data for all active tickers.
-
-    Returns a sync_id that can be used to poll progress.
+    Creates the job and starts the sync worker process (`python -m app.sync run --sync-id`),
+    which updates the ticker list and then syncs price data for all active tickers.
+    Returns a sync_id that can be used to poll progress. 409 if a sync for this index is
+    already active.
     """
     index = db.query(Index).filter(Index.code == index_code.upper()).first()
     if not index:
         raise HTTPException(status_code=404, detail=f"Index {index_code} not found")
 
-    sync_id = f"sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if start_date:
+        try:
+            date.fromisoformat(start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD")
 
-    total_tickers = (
-        db.query(Ticker).filter(Ticker.index_id == index.id, Ticker.is_active == True).count()
+    # Clear jobs left behind by a crashed or restarted worker before checking for an active one.
+    recover_stale_jobs(sessionmaker(bind=db.get_bind()))
+    db.expire_all()
+    active = (
+        db.query(SyncJob)
+        .filter(SyncJob.index_id == index.id, SyncJob.status.in_(ACTIVE_STATUSES))
+        .first()
     )
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A sync for {index.code} is already active (sync_id={active.sync_id})",
+        )
 
-    sync_job = SyncJob(
-        sync_id=sync_id,
-        index_id=index.id,
-        status="pending",
-        total_tickers=total_tickers,
-        processed_tickers=0,
-    )
-    db.add(sync_job)
-    db.commit()
-
-    background_tasks.add_task(
-        run_sync_job, sync_id=sync_id, index_id=index.id, start_date=start_date
-    )
+    sync_job = create_job(db, index)
+    try:
+        _spawn_sync_worker(sync_job.sync_id, start_date)
+    except OSError as exc:
+        sync_job.status = "failed"
+        sync_job.error_message = f"Could not start sync worker: {exc}"[:500]
+        sync_job.completed_at = datetime.now()
+        db.commit()
+        raise HTTPException(status_code=500, detail="Could not start sync worker")
 
     return {
-        "sync_id": sync_id,
-        "index_code": index_code.upper(),
+        "sync_id": sync_job.sync_id,
+        "index_code": index.code,
         "status": "in_progress",
-        "message": f"Sync started for {index_code.upper()}",
+        "message": f"Sync started for {index.code}",
     }
 
 
@@ -102,6 +131,7 @@ def get_sync_progress(
         "progress": {
             "total_tickers": sync_job.total_tickers,
             "processed_tickers": sync_job.processed_tickers,
+            "failed_tickers": sync_job.failed_tickers,
             "percent_complete": sync_job.progress_percent,
             "current_ticker": sync_job.current_ticker,
             "estimated_remaining_seconds": estimated_seconds,
@@ -177,123 +207,6 @@ def migrate_macd_data(
         "include_inactive": include_inactive,
         **result,
     }
-
-
-def _sync_ticker_worker(args):
-    """Worker function for multiprocessing ticker sync"""
-    ticker_id, start_date = args
-    from app.db.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        ticker = db.query(Ticker).filter(Ticker.id == ticker_id).first()
-        if ticker:
-            sync_service = DataSyncService(db)
-            sync_service.sync_ticker(ticker, start_date)
-            db.commit()
-        return ticker_id, True
-    except Exception:
-        db.rollback()
-        return ticker_id, False
-    finally:
-        db.close()
-
-
-def run_sync_job(
-    sync_id: str, index_id: int, start_date: Optional[str] = None, max_workers: int = 4
-):
-    """Background task to run sync job with multiprocessing"""
-    from app.db.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        sync_job = db.query(SyncJob).filter(SyncJob.sync_id == sync_id).first()
-        if not sync_job:
-            return
-
-        if sync_job.status == "cancelled":
-            if not sync_job.completed_at:
-                sync_job.completed_at = datetime.now()
-                db.commit()
-            return
-
-        sync_job.status = "in_progress"
-        db.commit()
-
-        index = db.query(Index).filter(Index.id == index_id).first()
-        if not index:
-            sync_job.status = "failed"
-            sync_job.error_message = f"Index {index_id} not found"
-            sync_job.completed_at = datetime.now()
-            db.commit()
-            return
-
-        sync_service = DataSyncService(db)
-
-        try:
-            sync_service.sync_index_ticker_list(index)
-        except Exception as e:
-            sync_job.status = "failed"
-            sync_job.error_message = f"Failed to sync ticker list: {str(e)}"
-            sync_job.completed_at = datetime.now()
-            db.commit()
-            return
-
-        tickers = (
-            db.query(Ticker).filter(Ticker.index_id == index_id, Ticker.is_active == True).all()
-        )
-
-        sync_job.total_tickers = len(tickers)
-        db.commit()
-
-        ticker_args = [(ticker.id, start_date) for ticker in tickers]
-
-        with multiprocessing.Pool(processes=max_workers) as pool:
-            processed = 0
-            for ticker_id, success in pool.imap_unordered(_sync_ticker_worker, ticker_args):
-                processed += 1
-
-                db.refresh(sync_job)
-                if sync_job.status == "cancelled":
-                    pool.terminate()
-                    break
-
-                ticker = next((t for t in tickers if t.id == ticker_id), None)
-                sync_job.current_ticker = ticker.symbol if ticker else None
-                sync_job.processed_tickers = processed
-                db.commit()
-
-        pool.join()
-
-        db.refresh(sync_job)
-        if sync_job.status == "cancelled":
-            if not sync_job.completed_at:
-                sync_job.completed_at = datetime.now()
-            sync_job.current_ticker = None
-            db.commit()
-            return
-
-        sync_job.status = "completed"
-        sync_job.completed_at = datetime.now()
-        sync_job.current_ticker = None
-
-        index.last_synced_at = datetime.now()
-        index.ticker_count = (
-            db.query(Ticker).filter(Ticker.index_id == index_id, Ticker.is_active == True).count()
-        )
-
-        db.commit()
-
-    except Exception as e:
-        sync_job = db.query(SyncJob).filter(SyncJob.sync_id == sync_id).first()
-        if sync_job:
-            sync_job.status = "failed"
-            sync_job.error_message = str(e)
-            sync_job.completed_at = datetime.now()
-            db.commit()
-
-    finally:
-        db.close()
 
 
 @router.post("/init-index")

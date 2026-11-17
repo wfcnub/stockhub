@@ -18,18 +18,22 @@ def _parse_list(value: Any) -> Any:
 
 
 def _normalize_database_url(url: str) -> str:
-    """Make the PostgreSQL driver explicit (psycopg 3); leave other URLs untouched."""
+    """Make the PostgreSQL driver explicit (psycopg 3). PostgreSQL is the only supported DB."""
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
             return "postgresql+psycopg://" + url[len(prefix) :]
-    return url
+    if url.startswith("postgresql+psycopg://"):
+        return url
+    raise ValueError(
+        "DATABASE_URL must be a PostgreSQL URL (postgresql://... or postgresql+psycopg://...)"
+    )
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Database
-    DATABASE_URL: str = "sqlite:///./stockhub.db"
+    # Database: required, PostgreSQL only (no default, so a missing setting fails loudly)
+    DATABASE_URL: str
 
     # CORS settings for frontend
     CORS_ORIGINS: Annotated[list[str], NoDecode] = [
@@ -44,6 +48,17 @@ class Settings(BaseSettings):
 
     # Data sync settings
     DEFAULT_START_DATE: str = "2021-01-01"
+    # Parallel ticker downloads per sync job (threads in the sync worker process).
+    SYNC_WORKERS: int = 4
+    # Re-fetch this many calendar days before the last stored bar, so late revisions by the
+    # data source are picked up by the upsert.
+    SYNC_REFETCH_DAYS: int = 7
+    # Today's daily bar is only stored after this local time in Asia/Jakarta (WIB, UTC+7).
+    # The IDX closing auction and post-trading end before this; the margin covers feed delay.
+    SYNC_BAR_FINAL_AFTER: str = "17:00"
+    # A job still `pending` this long after creation, with no worker holding its lock,
+    # is treated as abandoned.
+    SYNC_PENDING_GRACE_SECONDS: int = 300
 
     # Moving average windows (as specified)
     MA_WINDOWS: Annotated[list[int], NoDecode] = [5, 10, 15, 20, 50, 100, 200]

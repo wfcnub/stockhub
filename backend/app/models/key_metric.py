@@ -1,42 +1,39 @@
-from sqlalchemy import (
-    BigInteger,
-    Column,
-    Date,
-    DateTime,
-    Float,
-    ForeignKey,
-    Integer,
-    UniqueConstraint,
-)
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from __future__ import annotations
+
+import datetime as dt
+from typing import TYPE_CHECKING
+
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+if TYPE_CHECKING:
+    from app.models.ticker import Ticker
 
 
 class KeyMetric(Base):
     """Time-series fundamental metrics for tickers"""
 
     __tablename__ = "key_metrics"
-    __table_args__ = (
-        UniqueConstraint("ticker_id", "observation_date", name="uq_ticker_observation"),
+    __table_args__ = (UniqueConstraint("ticker_id", "observation_date"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id", ondelete="CASCADE"))
+    observation_date: Mapped[dt.date] = mapped_column(Date)
+    market_cap: Mapped[int | None] = mapped_column(BigInteger)
+    pe_ratio: Mapped[float | None]
+    pbv: Mapped[float | None]
+    dividend_yield: Mapped[float | None]
+    eps: Mapped[float | None]
+    roe: Mapped[float | None]
+    fiscal_year: Mapped[int | None]
+    fiscal_quarter: Mapped[int | None]
+    last_updated: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    id = Column(BigInteger, primary_key=True, index=True)
-    ticker_id = Column(Integer, ForeignKey("tickers.id"), nullable=False, index=True)
-    observation_date = Column(Date, nullable=False, index=True)
-    market_cap = Column(BigInteger)
-    pe_ratio = Column(Float)
-    pbv = Column(Float)
-    dividend_yield = Column(Float)
-    eps = Column(Float)
-    roe = Column(Float)
-    fiscal_year = Column(Integer)
-    fiscal_quarter = Column(Integer)
-    last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    ticker: Mapped[Ticker] = relationship(back_populates="key_metrics")
 
-    # Relationships
-    ticker = relationship("Ticker", back_populates="key_metrics")
-
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<KeyMetric(ticker_id={self.ticker_id}, date={self.observation_date})>"

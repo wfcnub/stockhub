@@ -1,0 +1,9 @@
+Alembic migrations for StockHub (PostgreSQL 18 only).
+
+- The URL comes from app.config.settings.DATABASE_URL; tests pass a connection or URL
+  through config.attributes["connection"] / config.attributes["url"].
+- 0001_baseline creates the v1.1.0 schema from scratch (fresh start, no stamping).
+- New revision: uv run alembic revision --autogenerate --rev-id 0002 -m "what changed"
+  then review the generated file by hand before committing.
+- CI checks: upgrade head -> downgrade base -> upgrade head, and `alembic check`
+  (models and migrations must match).
