@@ -2,10 +2,15 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { ADMIN_ACTIONS_ENABLED, addIndex, deleteIndex, getIndexes, updateIndex } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ADMIN_ACTIONS_ENABLED, addIndex, deleteIndex, updateIndex } from '@/lib/api';
+import { indexesQuery, queryKeys } from '@/lib/queries';
 import { AdminActionsNotice } from './AdminActionsNotice';
 import type { Index } from '@/types';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+
+// Stable reference for the "no data yet" list.
+const EMPTY_INDEXES: Index[] = [];
 
 type SectionKey = 'dashboard' | 'tickers' | 'screener' | 'analysis';
 
@@ -84,36 +89,38 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
   const mainNav = navItems.slice(0, 1);
   const featuresNav = navItems.slice(1);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [indexes, setIndexes] = useState<Index[]>([]);
-  const [isIndexesLoading, setIsIndexesLoading] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
   const [codeInput, setCodeInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [suffixInput, setSuffixInput] = useState('');
-  const [isAdding, setIsAdding] = useState(false);
   const [editingIndex, setEditingIndex] = useState<Index | null>(null);
   const [editCodeInput, setEditCodeInput] = useState('');
   const [editNameInput, setEditNameInput] = useState('');
   const [editSuffixInput, setEditSuffixInput] = useState('');
   const [editIsActive, setEditIsActive] = useState(true);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Index | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadIndexes = useCallback(async () => {
-    setIsIndexesLoading(true);
-    setSettingsError(null);
+  const queryClient = useQueryClient();
+  // The settings dialog always shows the full list (active and inactive); refetch each time it opens.
+  const indexesResult = useQuery({ ...indexesQuery(), staleTime: 0, enabled: isSettingsOpen });
+  const indexes = indexesResult.data ?? EMPTY_INDEXES;
+  const isIndexesLoading = indexesResult.isFetching;
+  const settingsLoadError = indexesResult.error ? indexesResult.error.message : null;
 
-    try {
-      const data = await getIndexes();
-      setIndexes(data);
-    } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : 'Failed to load indexes');
-    } finally {
-      setIsIndexesLoading(false);
-    }
-  }, []);
+  const addMutation = useMutation({ mutationFn: addIndex });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: Parameters<typeof updateIndex>[1] }) =>
+      updateIndex(id, payload),
+  });
+  const deleteMutation = useMutation({ mutationFn: (id: number) => deleteIndex(id, true) });
+  const isAdding = addMutation.isPending;
+  const isUpdating = updateMutation.isPending;
+  const isDeleting = deleteMutation.isPending;
+
+  // Every index list (active-only in the ticker filters and sync selector, full in settings) is stale
+  // after a change.
+  const reloadIndexes = () => queryClient.invalidateQueries({ queryKey: queryKeys.indexesAll() });
 
   const openSettings = useCallback(() => {
     setIsSettingsOpen(true);
@@ -121,7 +128,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
     setEditingIndex(null);
     setSettingsError(null);
     setSettingsSuccess(null);
-  }, []);
+  }, [setPendingDelete, setEditingIndex, setSettingsError, setSettingsSuccess]);
 
   const closeSettings = useCallback(() => {
     if (isAdding || isDeleting || isUpdating) {
@@ -131,15 +138,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
     setPendingDelete(null);
     setEditingIndex(null);
     setIsSettingsOpen(false);
-  }, [isAdding, isDeleting, isUpdating]);
-
-  useEffect(() => {
-    if (!isSettingsOpen) {
-      return;
-    }
-
-    void loadIndexes();
-  }, [isSettingsOpen, loadIndexes]);
+  }, [isAdding, isDeleting, isUpdating, setPendingDelete, setEditingIndex]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -202,25 +201,22 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
       return;
     }
 
-    setIsAdding(true);
     setSettingsError(null);
     setSettingsSuccess(null);
 
     try {
-      const createdIndex = await addIndex({
+      const createdIndex = await addMutation.mutateAsync({
         code: normalizedCode,
         name: normalizedName,
         yfinance_suffix: normalizedSuffix,
       });
-      await loadIndexes();
+      await reloadIndexes();
       setCodeInput('');
       setNameInput('');
       setSuffixInput('');
       setSettingsSuccess(`Index ${createdIndex.code} added.`);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to add index');
-    } finally {
-      setIsAdding(false);
     }
   };
 
@@ -266,25 +262,25 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
       return;
     }
 
-    setIsUpdating(true);
     setSettingsError(null);
     setSettingsSuccess(null);
 
     try {
-      const updatedIndex = await updateIndex(editingIndex.id, {
-        code: normalizedCode,
-        name: normalizedName,
-        yfinance_suffix: normalizedSuffix,
-        is_active: editIsActive,
+      const updatedIndex = await updateMutation.mutateAsync({
+        id: editingIndex.id,
+        payload: {
+          code: normalizedCode,
+          name: normalizedName,
+          yfinance_suffix: normalizedSuffix,
+          is_active: editIsActive,
+        },
       });
 
-      await loadIndexes();
+      await reloadIndexes();
       setEditingIndex(null);
       setSettingsSuccess(`Index ${updatedIndex.code} updated.`);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to update index');
-    } finally {
-      setIsUpdating(false);
     }
   };
 
@@ -293,19 +289,16 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
       return;
     }
 
-    setIsDeleting(true);
     setSettingsError(null);
     setSettingsSuccess(null);
 
     try {
-      const deleteResult = await deleteIndex(pendingDelete.id, true);
-      await loadIndexes();
+      const deleteResult = await deleteMutation.mutateAsync(pendingDelete.id);
+      await reloadIndexes();
       setSettingsSuccess(deleteResult.message || `Index ${pendingDelete.code} deleted.`);
       setPendingDelete(null);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to delete index');
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -472,10 +465,10 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-4 md:p-6 lg:p-7">
-              {settingsError ? (
+              {(settingsError ?? settingsLoadError) ? (
                 <div className="rounded-gemini border border-gemini-accent-red/35 bg-gemini-accent-red/10 p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-gemini-accent-red">{settingsError}</p>
+                    <p className="text-sm text-gemini-accent-red">{settingsError ?? settingsLoadError}</p>
                     <button
                       type="button"
                       onClick={() => setSettingsError(null)}
@@ -572,7 +565,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
                   </div>
                   <button
                     type="button"
-                    onClick={loadIndexes}
+                    onClick={() => void indexesResult.refetch()}
                     className="gemini-button px-3 py-1.5 text-xs"
                     disabled={isIndexesLoading || isAdding || isDeleting || isUpdating}
                   >

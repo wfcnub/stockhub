@@ -1,28 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { Stats } from '@/types';
-import { getStats } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { statsQuery } from '@/lib/queries';
 
 export function HeroSection() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const data = await getStats();
-        setStats(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load stats');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchStats();
-  }, []);
+  const query = useQuery(statsQuery());
+  const stats = query.data ?? null;
+  const isLoading = query.isPending;
+  const error = query.error ? query.error.message : null;
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '—';

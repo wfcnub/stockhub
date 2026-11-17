@@ -1,11 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { Index, SyncProgress } from '@/types';
-import { ADMIN_ACTIONS_ENABLED, getIndexes, startSync, getSyncProgress, stopSync } from '@/lib/api';
+import { ADMIN_ACTIONS_ENABLED, startSync, getSyncProgress, stopSync } from '@/lib/api';
+import { indexesQuery } from '@/lib/queries';
 import { AdminActionsNotice } from '@/components/layout/AdminActionsNotice';
 
 const ACTIVE_SYNC_STORAGE_KEY = 'stockhub.active-sync-id';
+
+// Stable reference for the "no data yet" list.
+const EMPTY_INDEXES: Index[] = [];
 
 const isTerminalStatus = (status: SyncProgress['status']) => {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
@@ -16,34 +21,19 @@ const isNotFoundError = (error: unknown) => {
 };
 
 export function SyncSection() {
-  const [indexes, setIndexes] = useState<Index[]>([]);
-  const [selectedIndex, setSelectedIndex] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
+  const indexesResult = useQuery(indexesQuery(true));
+  const indexes = indexesResult.data ?? EMPTY_INDEXES;
+  const isLoading = indexesResult.isPending;
+  // The user's choice wins; until they pick one, the first active index is selected.
+  const [chosenIndex, setSelectedIndex] = useState<string>('');
+  const selectedIndex = chosenIndex || (indexes.find((idx) => idx.is_active)?.code ?? '');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [syncError, setError] = useState<string | null>(null);
+  // Sync errors replace the index-loading error once an action has failed or been retried.
+  const error = syncError ?? (indexesResult.error ? indexesResult.error.message : null);
   const [syncId, setSyncId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchIndexes = async () => {
-      try {
-        const data = await getIndexes(true);
-        setIndexes(data);
-
-        const firstActiveIndex = data.find((idx) => idx.is_active);
-        if (firstActiveIndex) {
-          setSelectedIndex(firstActiveIndex.code);
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load indexes');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchIndexes();
-  }, []);
 
   // Poll for sync progress when syncing
   const pollProgress = useCallback(async (currentSyncId: string) => {
