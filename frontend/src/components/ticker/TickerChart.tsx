@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
+import {
+  createChart,
+  ColorType,
+  IChartApi,
+  ISeriesApi,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+} from 'lightweight-charts';
 import type { MouseEventParams, Time } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
 import type { ChartDataPoint, TimeRangeValue, DivergenceEvent, TriangleEvent } from '@/types';
@@ -53,19 +61,19 @@ const MAX_LOOKBACK_BARS = 60;
 
 function isHistoricalDivergence(event: DivergenceEvent, data: ChartDataPoint[]): boolean {
   if (data.length === 0) return false;
-  
+
   const signalTimestamp = event.signal_timestamp;
   let signalIndex = -1;
-  
+
   for (let i = 0; i < data.length; i++) {
     if (dateStringToUnixSeconds(data[i].date) === signalTimestamp) {
       signalIndex = i;
       break;
     }
   }
-  
+
   if (signalIndex === -1) return false;
-  
+
   const barsAgo = data.length - 1 - signalIndex;
   return barsAgo >= MAX_LOOKBACK_BARS;
 }
@@ -180,10 +188,10 @@ function isOHLCValue(value: unknown): value is { open: number; high: number; low
   };
 
   return (
-    isFiniteNumber(candidate.open)
-    && isFiniteNumber(candidate.high)
-    && isFiniteNumber(candidate.low)
-    && isFiniteNumber(candidate.close)
+    isFiniteNumber(candidate.open) &&
+    isFiniteNumber(candidate.high) &&
+    isFiniteNumber(candidate.low) &&
+    isFiniteNumber(candidate.close)
   );
 }
 
@@ -228,14 +236,7 @@ interface ClippedLineSegment {
   y2: number;
 }
 
-function getClipOutCode(
-  x: number,
-  y: number,
-  minX: number,
-  minY: number,
-  maxX: number,
-  maxY: number,
-): number {
+function getClipOutCode(x: number, y: number, minX: number, minY: number, maxX: number, maxY: number): number {
   let code = 0;
 
   if (x < minX) {
@@ -464,13 +465,13 @@ export function TickerChart({
         borderColor: themeColors.borderColor,
         scaleMargins: isBullishView
           ? {
-            top: 0.05,
-            bottom: 0.42,
-          }
+              top: 0.05,
+              bottom: 0.42,
+            }
           : {
-            top: 0.05,
-            bottom: 0.2,
-          },
+              top: 0.05,
+              bottom: 0.2,
+            },
       },
       timeScale: {
         borderColor: themeColors.borderColor,
@@ -481,7 +482,7 @@ export function TickerChart({
     chartRef.current = chart;
 
     // Add candlestick series
-    const candlestickSeries = chart.addCandlestickSeries({
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
       upColor: themeColors.positive,
       downColor: themeColors.negative,
       borderDownColor: themeColors.negative,
@@ -493,7 +494,7 @@ export function TickerChart({
     seriesStore.candlestick = candlestickSeries;
 
     // Add volume series
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       color: themeColors.accentPurple,
       priceFormat: {
         type: 'volume',
@@ -513,7 +514,7 @@ export function TickerChart({
     seriesStore.volume = volumeSeries;
 
     if (isBullishView) {
-      const rsiSeries = chart.addLineSeries({
+      const rsiSeries = chart.addSeries(LineSeries, {
         color: themeColors.accentPurple,
         lineWidth: 2,
         priceScaleId: 'rsi',
@@ -532,10 +533,12 @@ export function TickerChart({
           return [];
         }
 
-        return [{
-          time: d.date as string,
-          value: d.indicators.rsi_14,
-        }];
+        return [
+          {
+            time: d.date as string,
+            value: d.indicators.rsi_14,
+          },
+        ];
       });
 
       rsiSeries.setData(rsiData);
@@ -548,17 +551,19 @@ export function TickerChart({
       ];
 
       const thresholdSeries = thresholdDefinitions.map((threshold) => {
-        const thresholdLine = chart.addLineSeries({
+        const thresholdLine = chart.addSeries(LineSeries, {
           color: threshold.color,
           lineWidth: 1,
           lineStyle: 2,
           priceScaleId: 'rsi',
         });
 
-        thresholdLine.setData(data.map((d) => ({
-          time: d.date as string,
-          value: threshold.value,
-        })));
+        thresholdLine.setData(
+          data.map((d) => ({
+            time: d.date as string,
+            value: threshold.value,
+          })),
+        );
 
         return thresholdLine;
       });
@@ -572,7 +577,7 @@ export function TickerChart({
     // Add MA lines
     seriesStore.ma.clear();
     selectedMA.forEach((period) => {
-      const maSeries = chart.addLineSeries({
+      const maSeries = chart.addSeries(LineSeries, {
         color: getMAColor(period, themeColors),
         lineWidth: 2,
         priceScaleId: 'right',
@@ -587,7 +592,7 @@ export function TickerChart({
           isFiniteNumber(d.price.open) &&
           isFiniteNumber(d.price.high) &&
           isFiniteNumber(d.price.low) &&
-          isFiniteNumber(d.price.close)
+          isFiniteNumber(d.price.close),
       )
       .map((d) => ({
         time: d.date as string,
@@ -608,7 +613,7 @@ export function TickerChart({
 
     // Add MA data
     selectedMA.forEach((period) => {
-      const maKey = `ma_${period}` as keyof typeof data[0]['indicators'];
+      const maKey = `ma_${period}` as keyof (typeof data)[0]['indicators'];
       const maSeries = seriesStore.ma.get(period);
       if (maSeries) {
         const maData = data.flatMap((d) => {
@@ -617,10 +622,12 @@ export function TickerChart({
             return [];
           }
 
-          return [{
-            time: d.date as string,
-            value: maValue,
-          }];
+          return [
+            {
+              time: d.date as string,
+              value: maValue,
+            },
+          ];
         });
         maSeries.setData(maData);
       }
@@ -647,7 +654,7 @@ export function TickerChart({
         const isInvalidatedEvent = event.is_invalidated === true;
         const isHistoricalEvent = isHistoricalDivergence(event, data);
         const isEmergingEvent = event.strategy_type === 'BULLISH_EMERGING';
-        
+
         // Skip if invalidated and not showing, or if historical and not showing, or if emerging and not showing
         if (isInvalidatedEvent && !showInvalidatedAggressiveRef.current) {
           return;
@@ -667,7 +674,7 @@ export function TickerChart({
         const y1 = candleSeries.priceToCoordinate(event.p1.low);
         const y2 = candleSeries.priceToCoordinate(event.p2.low);
         const { lineColor, boxColorTriplet } = getDivergenceColors(event);
-        
+
         // Determine styling based on invalidated/historical status
         let renderedLineColor = lineColor;
         if (isInvalidatedEvent) {
@@ -676,7 +683,7 @@ export function TickerChart({
           // Historical divergences: gray color with reduced opacity
           renderedLineColor = `rgba(128, 128, 128, 0.5)`;
         }
-        
+
         const lineStyle = event.line_style === 'dotted' ? 'dotted' : 'dashed';
 
         if (x1 === null || x2 === null || y1 === null || y2 === null) {
@@ -703,7 +710,7 @@ export function TickerChart({
         // Opacity based on state
         let backgroundOpacity = event.grade === 'oversold' ? 0.2 : 0.1;
         let borderOpacity = 0.5;
-        
+
         if (isInvalidatedEvent) {
           backgroundOpacity = 0.06;
           borderOpacity = 0.35;
@@ -719,7 +726,7 @@ export function TickerChart({
         box.style.width = `${width}px`;
         box.style.height = `${height}px`;
         box.style.borderRadius = '4px';
-        
+
         // Use gray for historical, original color for invalidated/normal
         if (isHistoricalEvent) {
           box.style.backgroundColor = `rgba(128, 128, 128, ${backgroundOpacity})`;
@@ -728,17 +735,12 @@ export function TickerChart({
           box.style.backgroundColor = `rgba(${boxColorTriplet}, ${backgroundOpacity})`;
           box.style.border = `1px ${lineStyle} rgba(${boxColorTriplet}, ${borderOpacity})`;
         }
-        
+
         overlay.appendChild(box);
 
         createOverlayLine(overlay, x1, y1, x2, y2, renderedLineColor, lineStyle, 2);
 
-        if (
-          isBullishView
-          && rsiSeries
-          && isFiniteNumber(event.p1.rsi_14)
-          && isFiniteNumber(event.p2.rsi_14)
-        ) {
+        if (isBullishView && rsiSeries && isFiniteNumber(event.p1.rsi_14) && isFiniteNumber(event.p2.rsi_14)) {
           const rsiY1 = rsiSeries.priceToCoordinate(event.p1.rsi_14);
           const rsiY2 = rsiSeries.priceToCoordinate(event.p2.rsi_14);
 
@@ -767,13 +769,9 @@ export function TickerChart({
 
       triangles.forEach((event) => {
         const colorTriplet = getTriangleColorTriplet(event);
-        const opacity = event.confidence_level === 'high'
-          ? 0.95
-          : (event.confidence_level === 'medium' ? 0.82 : 0.7);
+        const opacity = event.confidence_level === 'high' ? 0.95 : event.confidence_level === 'medium' ? 0.82 : 0.7;
         const lineColor = `rgba(${colorTriplet}, ${opacity})`;
-        const lineStyle = event.line_style === 'dotted'
-          ? 'dotted'
-          : (event.line_style === 'dashed' ? 'dashed' : 'solid');
+        const lineStyle = event.line_style === 'dotted' ? 'dotted' : event.line_style === 'dashed' ? 'dashed' : 'solid';
         const lineWidth = getTriangleLineWidth(event.confidence_level);
 
         const upperStartTime = timestampToChartDate(event.upper_line.start_timestamp);
@@ -811,8 +809,8 @@ export function TickerChart({
         const markerSize = event.confidence_level === 'high' ? 10 : 8;
         const marker = document.createElement('div');
         marker.style.position = 'absolute';
-        marker.style.left = `${signalX - (markerSize / 2)}px`;
-        marker.style.top = `${signalY - (markerSize / 2)}px`;
+        marker.style.left = `${signalX - markerSize / 2}px`;
+        marker.style.top = `${signalY - markerSize / 2}px`;
         marker.style.width = `${markerSize}px`;
         marker.style.height = `${markerSize}px`;
         marker.style.borderRadius = '50%';
@@ -855,15 +853,9 @@ export function TickerChart({
         return;
       }
 
-      const candleValue = seriesStore.candlestick
-        ? param.seriesData.get(seriesStore.candlestick)
-        : undefined;
-      const volumeValue = seriesStore.volume
-        ? param.seriesData.get(seriesStore.volume)
-        : undefined;
-      const rsiValue = seriesStore.rsi
-        ? param.seriesData.get(seriesStore.rsi)
-        : undefined;
+      const candleValue = seriesStore.candlestick ? param.seriesData.get(seriesStore.candlestick) : undefined;
+      const volumeValue = seriesStore.volume ? param.seriesData.get(seriesStore.volume) : undefined;
+      const rsiValue = seriesStore.rsi ? param.seriesData.get(seriesStore.rsi) : undefined;
 
       const open = isOHLCValue(candleValue) ? candleValue.open : mappedPoint.price.open;
       const high = isOHLCValue(candleValue) ? candleValue.high : mappedPoint.price.high;
@@ -872,11 +864,11 @@ export function TickerChart({
 
       const volume = isSingleValueData(volumeValue)
         ? volumeValue.value
-        : (isFiniteNumber(mappedPoint.price.volume) ? mappedPoint.price.volume : null);
+        : isFiniteNumber(mappedPoint.price.volume)
+          ? mappedPoint.price.volume
+          : null;
 
-      const rsiFromPoint = isFiniteNumber(mappedPoint.indicators.rsi_14)
-        ? mappedPoint.indicators.rsi_14
-        : null;
+      const rsiFromPoint = isFiniteNumber(mappedPoint.indicators.rsi_14) ? mappedPoint.indicators.rsi_14 : null;
       const rsi = isSingleValueData(rsiValue) ? rsiValue.value : rsiFromPoint;
 
       const maValues = selectedMA.map((period) => {
@@ -942,9 +934,7 @@ export function TickerChart({
       }
     };
 
-    const resizeObserver = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(handleContainerResize)
-      : null;
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleContainerResize) : null;
     if (chartContainerRef.current && resizeObserver) {
       resizeObserver.observe(chartContainerRef.current);
     }
@@ -976,15 +966,7 @@ export function TickerChart({
       setCursorReadout(null);
       chart.remove();
     };
-  }, [
-    data,
-    selectedMA,
-    themeRefreshKey,
-    divergences,
-    triangles,
-    isBullishView,
-    isTriangleView,
-  ]);
+  }, [data, selectedMA, themeRefreshKey, divergences, triangles, isBullishView, isTriangleView]);
 
   // Separate effect to update overlay visibility when divergence toggles change
   // without recreating the chart (preserves zoom/pan state)
@@ -1026,8 +1008,19 @@ export function TickerChart({
           className="inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1.5 text-xs font-semibold text-gemini-accent-red"
           title={error}
         >
-          <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            className="h-3.5 w-3.5 flex-shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
           <span className="truncate">Failed to load chart data</span>
         </div>
@@ -1048,11 +1041,9 @@ export function TickerChart({
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
         <h3 className="text-lg font-semibold text-gemini-text-primary">
           {symbol}{' '}
-          {isTriangleView
-            ? 'Triangle Pattern View'
-            : (isBullishView ? 'Price + RSI Divergence View' : 'Price Chart')}
+          {isTriangleView ? 'Triangle Pattern View' : isBullishView ? 'Price + RSI Divergence View' : 'Price Chart'}
         </h3>
-        
+
         <div className="flex flex-wrap gap-4">
           {/* View Selector */}
           <div className="flex gap-1">
@@ -1130,7 +1121,9 @@ export function TickerChart({
           {isBullishView && (
             <div className="flex gap-2">
               <div className="inline-flex gap-2 items-center rounded-lg border border-gemini-surface-border/30 bg-gemini-bg-secondary/50 px-3 py-2">
-                <div className="text-xs font-semibold text-gemini-text-secondary whitespace-nowrap">Advanced Options:</div>
+                <div className="text-xs font-semibold text-gemini-text-secondary whitespace-nowrap">
+                  Advanced Options:
+                </div>
                 <button
                   onClick={() => setShowInvalidatedAggressive((current) => !current)}
                   className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
@@ -1173,8 +1166,12 @@ export function TickerChart({
           {cursorReadout ? (
             <div className="space-y-1 text-gemini-text-secondary">
               <div className="font-semibold text-gemini-text-primary">{formatDateLabel(cursorReadout.date)}</div>
-              <div>O {formatFixed(cursorReadout.open)} | H {formatFixed(cursorReadout.high)}</div>
-              <div>L {formatFixed(cursorReadout.low)} | C {formatFixed(cursorReadout.close)}</div>
+              <div>
+                O {formatFixed(cursorReadout.open)} | H {formatFixed(cursorReadout.high)}
+              </div>
+              <div>
+                L {formatFixed(cursorReadout.low)} | C {formatFixed(cursorReadout.close)}
+              </div>
               {cursorReadout.rsi !== null && (
                 <div className="text-gemini-accent-purple">RSI 14: {formatFixed(cursorReadout.rsi, 2)}</div>
               )}
@@ -1205,16 +1202,10 @@ export function TickerChart({
       {/* Legend */}
       <div className="mt-4 flex flex-wrap gap-4">
         {selectedMA.map((period) => (
-            <div
-              key={period}
-              className="flex items-center gap-2 text-sm text-gemini-text-secondary"
-            >
-              <div
-                className="w-3 h-0.5 rounded"
-                style={{ backgroundColor: getMAColor(period, maThemeColors) }}
-              />
-              <span>MA {period}</span>
-            </div>
+          <div key={period} className="flex items-center gap-2 text-sm text-gemini-text-secondary">
+            <div className="w-3 h-0.5 rounded" style={{ backgroundColor: getMAColor(period, maThemeColors) }} />
+            <span>MA {period}</span>
+          </div>
         ))}
         {isTriangleView ? (
           <>
@@ -1230,7 +1221,9 @@ export function TickerChart({
               <div className="h-0.5 w-4 border-t-2" style={{ borderColor: 'rgb(239, 68, 68)' }} />
               <span>Bearish breakout</span>
             </div>
-            <div className="text-sm text-gemini-text-tertiary">High-confidence triangles use thicker lines and larger markers</div>
+            <div className="text-sm text-gemini-text-tertiary">
+              High-confidence triangles use thicker lines and larger markers
+            </div>
           </>
         ) : (
           <>

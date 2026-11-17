@@ -974,7 +974,14 @@ Keep API status contract stable: normalize legacy DB status `running` to `in_pro
 ## Implementation Notes for Frontend
 
 ### Environment Variable
-Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`.
+- Local development: `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`. The browser calls the backend directly, and every endpoint is available.
+- Container and production: `NEXT_PUBLIC_API_URL=/api/v1` (set at build time). The browser calls the Next.js server, which proxies to `BACKEND_INTERNAL_URL` (runtime, e.g. `http://backend:8000`; optional `BACKEND_PROXY_TIMEOUT_MS`, default 60000). The backend itself is not published.
+
+### Frontend proxy rules (`frontend/src/app/api/[...path]/route.ts`)
+- Only `GET` and `HEAD` on `/api/v1/*` are forwarded. `POST`, `PUT`, `PATCH`, `DELETE` and `OPTIONS` return `405` with `{ "detail": ... }` and `Allow: GET, HEAD` until the backend has an admin token. So `POST /sync/start`, `POST /sync/stop`, `POST /indexes`, `PATCH /indexes/{id}`, `DELETE /indexes/{id}` and the `/sync/*` admin routes are unavailable through the proxy, and the UI shows them as disabled (`NEXT_PUBLIC_ADMIN_ACTIONS` overrides this).
+- Paths outside `/api/v1` (`/docs`, `/openapi.json`, `/health`) and `.`/`..` segments return `404`.
+- If the backend is unreachable the proxy returns `502 { "detail": "Backend unavailable" }`; on timeout it returns `504`.
+- Only allow-listed headers are forwarded. Request: `accept`, `accept-language`, `if-none-match`, `if-modified-since`. Cookies, `Authorization` and the Cloudflare Access JWT never reach the backend. Response: `content-type`, `cache-control`, `etag`, `last-modified`, `expires`, `content-language`.
 
 ### Key Integrations
 - Hero: `GET /stats`

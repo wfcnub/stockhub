@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
-  TickerDetails,
   ChartDataPoint,
   TimeRangeValue,
   DivergenceEvent,
@@ -13,10 +13,15 @@ import type {
   TriangleConfigParams,
   MACDMovingAverageType,
 } from '@/types';
-import { TIME_RANGES } from '@/types';
-import { getTicker, getChartData, getTickerDivergences, getTickerTriangles } from '@/lib/api';
+import { chartQuery, tickerDivergencesQuery, tickerQuery, tickerTrianglesQuery } from '@/lib/queries';
 import { KeyMetrics, TickerChart, MACDChart } from '@/components/ticker';
 import { ControlShell } from '@/components/layout/ControlShell';
+import { parseBooleanParam, parseBoundedInteger } from '@/lib/urlParams';
+
+// Stable empty references so memoised values do not change identity on every render.
+const EMPTY_CHART_DATA: ChartDataPoint[] = [];
+const EMPTY_DIVERGENCES: DivergenceEvent[] = [];
+const EMPTY_TRIANGLES: TriangleEvent[] = [];
 
 const DEFAULT_MA_PERIODS = [10, 15, 20, 50, 100, 200];
 
@@ -24,34 +29,6 @@ const DEFAULT_TRIANGLE_LOOKBACK_BARS = 60;
 const DEFAULT_TRIANGLE_PIVOT_LEFT = 3;
 const DEFAULT_TRIANGLE_PIVOT_RIGHT = 1;
 const DEFAULT_TRIANGLE_MIN_CONFIDENCE = 0;
-
-function toBoundedInteger(
-  value: string | null,
-  fallback: number,
-  minimum: number,
-  maximum: number,
-): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  const rounded = Math.round(parsed);
-  if (rounded < minimum || rounded > maximum) {
-    return fallback;
-  }
-
-  return rounded;
-}
-
-function toBooleanQueryValue(value: string | null): boolean {
-  if (value === null) {
-    return true;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-}
 
 function normalizeIndexCode(value: string): string {
   return value.trim().toUpperCase();
@@ -62,14 +39,6 @@ export default function TickerDetailPage() {
   const searchParams = useSearchParams();
   const symbol = params.symbol as string;
 
-  const [ticker, setTicker] = useState<TickerDetails | null>(null);
-  const [rawChartData, setRawChartData] = useState<ChartDataPoint[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [chartLoading, setChartLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [chartError, setChartError] = useState<string | null>(null);
-  const [divergences, setDivergences] = useState<DivergenceEvent[]>([]);
-  const [triangles, setTriangles] = useState<TriangleEvent[]>([]);
   const [selectedRange, setSelectedRange] = useState<TimeRangeValue>('ALL');
   const [selectedMA, setSelectedMA] = useState<number[]>(DEFAULT_MA_PERIODS);
   const [selectedMacdType, setSelectedMacdType] = useState<MACDMovingAverageType>('sma');
@@ -79,25 +48,10 @@ export default function TickerDetailPage() {
       return undefined;
     }
 
-    const lookbackBars = toBoundedInteger(
-      searchParams.get('tri_lookback'),
-      DEFAULT_TRIANGLE_LOOKBACK_BARS,
-      30,
-      180,
-    );
-    const pivotLeftWindow = toBoundedInteger(
-      searchParams.get('tri_left'),
-      DEFAULT_TRIANGLE_PIVOT_LEFT,
-      1,
-      10,
-    );
-    const pivotRightWindow = toBoundedInteger(
-      searchParams.get('tri_right'),
-      DEFAULT_TRIANGLE_PIVOT_RIGHT,
-      0,
-      10,
-    );
-    const minConfidence = toBoundedInteger(
+    const lookbackBars = parseBoundedInteger(searchParams.get('tri_lookback'), DEFAULT_TRIANGLE_LOOKBACK_BARS, 30, 180);
+    const pivotLeftWindow = parseBoundedInteger(searchParams.get('tri_left'), DEFAULT_TRIANGLE_PIVOT_LEFT, 1, 10);
+    const pivotRightWindow = parseBoundedInteger(searchParams.get('tri_right'), DEFAULT_TRIANGLE_PIVOT_RIGHT, 0, 10);
+    const minConfidence = parseBoundedInteger(
       searchParams.get('tri_min_conf'),
       DEFAULT_TRIANGLE_MIN_CONFIDENCE,
       0,
@@ -108,12 +62,9 @@ export default function TickerDetailPage() {
     const triState = searchParams.get('tri_state');
     const triDirection = searchParams.get('tri_dir');
 
-    const includePotential = toBooleanQueryValue(searchParams.get('tri_potential'));
-    const includeBreakouts = toBooleanQueryValue(searchParams.get('tri_breakout'));
-    const rawBreakoutRelaxed = searchParams.get('tri_breakout_relaxed');
-    const breakoutRelaxed = rawBreakoutRelaxed === null
-      ? false
-      : toBooleanQueryValue(rawBreakoutRelaxed);
+    const includePotential = parseBooleanParam(searchParams.get('tri_potential'), true);
+    const includeBreakouts = parseBooleanParam(searchParams.get('tri_breakout'), true);
+    const breakoutRelaxed = parseBooleanParam(searchParams.get('tri_breakout_relaxed'), false);
 
     const triangleTypes =
       triType === 'ascending' || triType === 'descending' || triType === 'symmetrical'
@@ -140,36 +91,28 @@ export default function TickerDetailPage() {
     };
   }, [searchParams]);
 
-  const fetchTicker = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      const data = await getTicker(symbol);
-      setTicker(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load ticker');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [symbol]);
+  const tickerResult = useQuery(tickerQuery(symbol));
+  const chartResult = useQuery({
+    ...chartQuery(symbol, {
+      range: selectedRange,
+      ma_periods: selectedMA.length > 0 ? selectedMA.join(',') : undefined,
+    }),
+    // Keep showing the previous range/MA data (under the loading overlay) while the next one loads.
+    placeholderData: keepPreviousData,
+  });
+  // Divergence and triangle overlays are optional: a failed request never blocks the main chart,
+  // it just shows no overlay.
+  const divergencesResult = useQuery(tickerDivergencesQuery(symbol, { include_invalidated: true }));
+  const trianglesResult = useQuery(tickerTrianglesQuery(symbol, triangleQueryParams));
 
-  const fetchChartData = useCallback(async () => {
-    setChartLoading(true);
-    setChartError(null);
-    
-    try {
-      const response = await getChartData(symbol, {
-        range: selectedRange,
-        ma_periods: selectedMA.length > 0 ? selectedMA.join(',') : undefined,
-      });
-      setRawChartData(response.data);
-    } catch (err) {
-      setChartError(err instanceof Error ? err.message : 'Failed to load chart data');
-    } finally {
-      setChartLoading(false);
-    }
-  }, [symbol, selectedRange, selectedMA]);
+  const ticker = tickerResult.data ?? null;
+  const isLoading = tickerResult.isPending;
+  const error = tickerResult.error ? tickerResult.error.message : null;
+  const rawChartData = chartResult.data?.data ?? EMPTY_CHART_DATA;
+  const chartLoading = chartResult.isFetching;
+  const chartError = chartResult.error ? chartResult.error.message : null;
+  const divergences = divergencesResult.data?.events ?? EMPTY_DIVERGENCES;
+  const triangles = trianglesResult.data?.events ?? EMPTY_TRIANGLES;
 
   const macdChartData = useMemo(() => {
     return rawChartData.map((point) => {
@@ -178,11 +121,7 @@ export default function TickerDetailPage() {
         return point;
       }
 
-      const selectedMacd =
-        modeData[selectedMacdType]
-        ?? modeData.sma
-        ?? modeData.ema
-        ?? point.indicators.macd;
+      const selectedMacd = modeData[selectedMacdType] ?? modeData.sma ?? modeData.ema ?? point.indicators.macd;
 
       if (!selectedMacd) {
         return point;
@@ -201,41 +140,6 @@ export default function TickerDetailPage() {
   const isSelectedMacdModeAvailable = useMemo(() => {
     return rawChartData.some((point) => Boolean(point.indicators.macd_modes?.[selectedMacdType]));
   }, [rawChartData, selectedMacdType]);
-
-  const fetchDivergences = useCallback(async () => {
-    try {
-      const response = await getTickerDivergences(symbol, { include_invalidated: true });
-      setDivergences(response.events);
-    } catch {
-      setDivergences([]);
-    }
-  }, [symbol]);
-
-  const fetchTriangles = useCallback(async () => {
-    try {
-      const response = await getTickerTriangles(symbol, triangleQueryParams);
-      setTriangles(response.events);
-    } catch {
-      // Triangle overlays are optional and should never block the main chart module.
-      setTriangles([]);
-    }
-  }, [symbol, triangleQueryParams]);
-
-  useEffect(() => {
-    fetchTicker();
-  }, [fetchTicker]);
-
-  useEffect(() => {
-    fetchChartData();
-  }, [fetchChartData]);
-
-  useEffect(() => {
-    fetchDivergences();
-  }, [fetchDivergences]);
-
-  useEffect(() => {
-    fetchTriangles();
-  }, [fetchTriangles]);
 
   if (isLoading) {
     return (
@@ -262,7 +166,11 @@ export default function TickerDetailPage() {
     <ControlShell
       activeSection="analysis"
       title={`${symbol} Overview`}
-      subtitle={error ? 'Some data could not be loaded. Available modules are still shown below.' : 'Review valuation metrics, chart structure, and momentum overlays.'}
+      subtitle={
+        error
+          ? 'Some data could not be loaded. Available modules are still shown below.'
+          : 'Review valuation metrics, chart structure, and momentum overlays.'
+      }
       actionLabel="Back to Tickers"
       actionHref="/tickers"
     >
@@ -280,20 +188,29 @@ export default function TickerDetailPage() {
         {/* Key Metrics */}
         {error ? (
           <div className="rounded-gemini border border-gemini-accent-red/35 bg-gemini-accent-red/10 p-4">
-            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1 text-xs font-medium text-gemini-accent-red" title={error}>
-              <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div
+              className="inline-flex max-w-full items-center gap-2 rounded-full border border-gemini-accent-red/30 bg-gemini-accent-red/10 px-3 py-1 text-xs font-medium text-gemini-accent-red"
+              title={error}
+            >
+              <svg
+                className="h-3.5 w-3.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
               <span className="truncate">Failed to load ticker profile</span>
             </div>
           </div>
         ) : ticker ? (
-          <KeyMetrics
-            symbol={ticker.symbol}
-            name={ticker.name}
-            sector={ticker.sector}
-            metrics={ticker.key_metrics}
-          />
+          <KeyMetrics symbol={ticker.symbol} name={ticker.name} sector={ticker.sector} metrics={ticker.key_metrics} />
         ) : (
           <div className="rounded-gemini border border-gemini-surface-border bg-gemini-bg-secondary/45 p-4 text-sm text-gemini-text-secondary">
             Ticker profile is unavailable.
@@ -341,7 +258,8 @@ export default function TickerDetailPage() {
 
           {!isSelectedMacdModeAvailable ? (
             <p className="mt-2 text-xs text-gemini-text-muted">
-              {selectedMacdType.toUpperCase()} data is not available yet for this ticker; showing fallback values from stored MACD series.
+              {selectedMacdType.toUpperCase()} data is not available yet for this ticker; showing fallback values from
+              stored MACD series.
             </p>
           ) : null}
         </div>

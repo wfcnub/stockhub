@@ -2,9 +2,15 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { addIndex, deleteIndex, getIndexes, updateIndex } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ADMIN_ACTIONS_ENABLED, addIndex, deleteIndex, updateIndex } from '@/lib/api';
+import { indexesQuery, queryKeys } from '@/lib/queries';
+import { AdminActionsNotice } from './AdminActionsNotice';
 import type { Index } from '@/types';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+
+// Stable reference for the "no data yet" list.
+const EMPTY_INDEXES: Index[] = [];
 
 type SectionKey = 'dashboard' | 'tickers' | 'screener' | 'analysis';
 
@@ -29,7 +35,12 @@ const navItems: Array<{
     href: '/',
     icon: (
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 5h7v6H4V5zm9 0h7v10h-7V5zM4 13h7v6H4v-6zm9 4h7v2h-7v-2z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.8}
+          d="M4 5h7v6H4V5zm9 0h7v10h-7V5zM4 13h7v6H4v-6zm9 4h7v2h-7v-2z"
+        />
       </svg>
     ),
   },
@@ -58,53 +69,58 @@ const navItems: Array<{
 function SettingsIcon() {
   return (
     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10.3 3.8a2 2 0 0 1 3.4 0l.3.5a2 2 0 0 0 1.6 1l.6.1a2 2 0 0 1 1.7 2l.1.6a2 2 0 0 0 1 1.6l.5.3a2 2 0 0 1 0 3.4l-.5.3a2 2 0 0 0-1 1.6l-.1.6a2 2 0 0 1-1.7 2l-.6.1a2 2 0 0 0-1.6 1l-.3.5a2 2 0 0 1-3.4 0l-.3-.5a2 2 0 0 0-1.6-1l-.6-.1a2 2 0 0 1-1.7-2l-.1-.6a2 2 0 0 0-1-1.6l-.5-.3a2 2 0 0 1 0-3.4l.5-.3a2 2 0 0 0 1-1.6l.1-.6a2 2 0 0 1 1.7-2l.6-.1a2 2 0 0 0 1.6-1l.3-.5Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M10.3 3.8a2 2 0 0 1 3.4 0l.3.5a2 2 0 0 0 1.6 1l.6.1a2 2 0 0 1 1.7 2l.1.6a2 2 0 0 0 1 1.6l.5.3a2 2 0 0 1 0 3.4l-.5.3a2 2 0 0 0-1 1.6l-.1.6a2 2 0 0 1-1.7 2l-.6.1a2 2 0 0 0-1.6 1l-.3.5a2 2 0 0 1-3.4 0l-.3-.5a2 2 0 0 0-1.6-1l-.6-.1a2 2 0 0 1-1.7-2l-.1-.6a2 2 0 0 0-1-1.6l-.5-.3a2 2 0 0 1 0-3.4l.5-.3a2 2 0 0 0 1-1.6l.1-.6a2 2 0 0 1 1.7-2l.6-.1a2 2 0 0 0 1.6-1l.3-.5Z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
+      />
     </svg>
   );
 }
 
-export function ControlShell({
-  activeSection,
-  title,
-  subtitle,
-  actionLabel,
-  actionHref,
-  children,
-}: ControlShellProps) {
+export function ControlShell({ activeSection, title, subtitle, actionLabel, actionHref, children }: ControlShellProps) {
   const mainNav = navItems.slice(0, 1);
   const featuresNav = navItems.slice(1);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [indexes, setIndexes] = useState<Index[]>([]);
-  const [isIndexesLoading, setIsIndexesLoading] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
   const [codeInput, setCodeInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [suffixInput, setSuffixInput] = useState('');
-  const [isAdding, setIsAdding] = useState(false);
   const [editingIndex, setEditingIndex] = useState<Index | null>(null);
   const [editCodeInput, setEditCodeInput] = useState('');
   const [editNameInput, setEditNameInput] = useState('');
   const [editSuffixInput, setEditSuffixInput] = useState('');
   const [editIsActive, setEditIsActive] = useState(true);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Index | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadIndexes = useCallback(async () => {
-    setIsIndexesLoading(true);
-    setSettingsError(null);
+  const queryClient = useQueryClient();
+  // The settings dialog always shows the full list (active and inactive); refetch each time it opens.
+  const indexesResult = useQuery({ ...indexesQuery(), staleTime: 0, enabled: isSettingsOpen });
+  const indexes = indexesResult.data ?? EMPTY_INDEXES;
+  const isIndexesLoading = indexesResult.isFetching;
+  const settingsLoadError = indexesResult.error ? indexesResult.error.message : null;
 
-    try {
-      const data = await getIndexes();
-      setIndexes(data);
-    } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : 'Failed to load indexes');
-    } finally {
-      setIsIndexesLoading(false);
-    }
-  }, []);
+  const addMutation = useMutation({ mutationFn: addIndex });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: Parameters<typeof updateIndex>[1] }) =>
+      updateIndex(id, payload),
+  });
+  const deleteMutation = useMutation({ mutationFn: (id: number) => deleteIndex(id, true) });
+  const isAdding = addMutation.isPending;
+  const isUpdating = updateMutation.isPending;
+  const isDeleting = deleteMutation.isPending;
+
+  // Every index list (active-only in the ticker filters and sync selector, full in settings) is stale
+  // after a change.
+  const reloadIndexes = () => queryClient.invalidateQueries({ queryKey: queryKeys.indexesAll() });
 
   const openSettings = useCallback(() => {
     setIsSettingsOpen(true);
@@ -112,7 +128,7 @@ export function ControlShell({
     setEditingIndex(null);
     setSettingsError(null);
     setSettingsSuccess(null);
-  }, []);
+  }, [setPendingDelete, setEditingIndex, setSettingsError, setSettingsSuccess]);
 
   const closeSettings = useCallback(() => {
     if (isAdding || isDeleting || isUpdating) {
@@ -122,15 +138,7 @@ export function ControlShell({
     setPendingDelete(null);
     setEditingIndex(null);
     setIsSettingsOpen(false);
-  }, [isAdding, isDeleting, isUpdating]);
-
-  useEffect(() => {
-    if (!isSettingsOpen) {
-      return;
-    }
-
-    void loadIndexes();
-  }, [isSettingsOpen, loadIndexes]);
+  }, [isAdding, isDeleting, isUpdating, setPendingDelete, setEditingIndex]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -193,25 +201,22 @@ export function ControlShell({
       return;
     }
 
-    setIsAdding(true);
     setSettingsError(null);
     setSettingsSuccess(null);
 
     try {
-      const createdIndex = await addIndex({
+      const createdIndex = await addMutation.mutateAsync({
         code: normalizedCode,
         name: normalizedName,
         yfinance_suffix: normalizedSuffix,
       });
-      await loadIndexes();
+      await reloadIndexes();
       setCodeInput('');
       setNameInput('');
       setSuffixInput('');
       setSettingsSuccess(`Index ${createdIndex.code} added.`);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to add index');
-    } finally {
-      setIsAdding(false);
     }
   };
 
@@ -252,34 +257,30 @@ export function ControlShell({
       return;
     }
 
-    if (
-      indexes.some(
-        (idx) => idx.id !== editingIndex.id && idx.code.toUpperCase() === normalizedCode
-      )
-    ) {
+    if (indexes.some((idx) => idx.id !== editingIndex.id && idx.code.toUpperCase() === normalizedCode)) {
       setSettingsError(`Index ${normalizedCode} already exists.`);
       return;
     }
 
-    setIsUpdating(true);
     setSettingsError(null);
     setSettingsSuccess(null);
 
     try {
-      const updatedIndex = await updateIndex(editingIndex.id, {
-        code: normalizedCode,
-        name: normalizedName,
-        yfinance_suffix: normalizedSuffix,
-        is_active: editIsActive,
+      const updatedIndex = await updateMutation.mutateAsync({
+        id: editingIndex.id,
+        payload: {
+          code: normalizedCode,
+          name: normalizedName,
+          yfinance_suffix: normalizedSuffix,
+          is_active: editIsActive,
+        },
       });
 
-      await loadIndexes();
+      await reloadIndexes();
       setEditingIndex(null);
       setSettingsSuccess(`Index ${updatedIndex.code} updated.`);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to update index');
-    } finally {
-      setIsUpdating(false);
     }
   };
 
@@ -288,19 +289,16 @@ export function ControlShell({
       return;
     }
 
-    setIsDeleting(true);
     setSettingsError(null);
     setSettingsSuccess(null);
 
     try {
-      const deleteResult = await deleteIndex(pendingDelete.id, true);
-      await loadIndexes();
+      const deleteResult = await deleteMutation.mutateAsync(pendingDelete.id);
+      await reloadIndexes();
       setSettingsSuccess(deleteResult.message || `Index ${pendingDelete.code} deleted.`);
       setPendingDelete(null);
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to delete index');
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -322,7 +320,12 @@ export function ControlShell({
             <div className="border-b border-gemini-surface-border px-4 py-5">
               <div className="flex items-center gap-2 text-gemini-accent-orange">
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4h16v16H4V4Zm3 3v3h3V7H7Zm0 7h10" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.8}
+                    d="M4 4h16v16H4V4Zm3 3v3h3V7H7Zm0 7h10"
+                  />
                 </svg>
                 <span className="text-sm font-semibold tracking-wide">StockHub Analytics</span>
               </div>
@@ -365,11 +368,7 @@ export function ControlShell({
             </nav>
 
             <div className="mt-auto border-t border-gemini-surface-border p-3">
-              <button
-                type="button"
-                onClick={openSettings}
-                className="hud-side-link w-full"
-              >
+              <button type="button" onClick={openSettings} className="hud-side-link w-full">
                 <span className="text-gemini-text-tertiary">
                   <SettingsIcon />
                 </span>
@@ -404,10 +403,7 @@ export function ControlShell({
 
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {actionLabel && actionHref ? (
-                    <Link
-                      href={actionHref}
-                      className="gemini-button rounded-full px-3 py-2 text-xs font-semibold"
-                    >
+                    <Link href={actionHref} className="gemini-button rounded-full px-3 py-2 text-xs font-semibold">
                       {actionLabel}
                     </Link>
                   ) : null}
@@ -469,17 +465,23 @@ export function ControlShell({
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-4 md:p-6 lg:p-7">
-              {settingsError ? (
+              {(settingsError ?? settingsLoadError) ? (
                 <div className="rounded-gemini border border-gemini-accent-red/35 bg-gemini-accent-red/10 p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-gemini-accent-red">{settingsError}</p>
+                    <p className="text-sm text-gemini-accent-red">{settingsError ?? settingsLoadError}</p>
                     <button
                       type="button"
                       onClick={() => setSettingsError(null)}
                       className="inline-flex h-6 w-6 items-center justify-center rounded-full text-gemini-accent-red/80 transition-colors hover:bg-gemini-accent-red/20 hover:text-gemini-accent-red"
                       aria-label="Dismiss error"
                     >
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6l12 12M18 6L6 18" />
                       </svg>
                     </button>
@@ -497,7 +499,13 @@ export function ControlShell({
                       className="inline-flex h-6 w-6 items-center justify-center rounded-full text-gemini-accent-green/80 transition-colors hover:bg-gemini-accent-green/20 hover:text-gemini-accent-green"
                       aria-label="Dismiss success message"
                     >
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6l12 12M18 6L6 18" />
                       </svg>
                     </button>
@@ -507,9 +515,8 @@ export function ControlShell({
 
               <section className="space-y-3">
                 <h4 className="text-base font-semibold text-gemini-text-primary">Manage Indexes</h4>
-                <p className="text-sm text-gemini-text-secondary">
-                  Add, update, and remove index definitions.
-                </p>
+                <p className="text-sm text-gemini-text-secondary">Add, update, and remove index definitions.</p>
+                <AdminActionsNotice />
 
                 <form onSubmit={handleAddIndex} className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)_140px_auto]">
                   <input
@@ -519,7 +526,7 @@ export function ControlShell({
                     placeholder="Code"
                     maxLength={12}
                     className="gemini-input"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   />
                   <input
                     type="text"
@@ -527,7 +534,7 @@ export function ControlShell({
                     onChange={(event) => setNameInput(event.target.value)}
                     placeholder="Index name"
                     className="gemini-input"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   />
                   <input
                     type="text"
@@ -536,12 +543,12 @@ export function ControlShell({
                     placeholder="Suffix (.JK)"
                     maxLength={12}
                     className="gemini-input"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   />
                   <button
                     type="submit"
                     className="gemini-button-primary whitespace-nowrap px-4 py-3 text-sm"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   >
                     {isAdding ? 'Adding...' : 'Add Index'}
                   </button>
@@ -552,11 +559,13 @@ export function ControlShell({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h4 className="text-base font-semibold text-gemini-text-primary">Current Indexes</h4>
-                    <p className="mt-1 text-xs text-gemini-text-tertiary">Use Edit Index on any row to update code, name, suffix, or status.</p>
+                    <p className="mt-1 text-xs text-gemini-text-tertiary">
+                      Use Edit Index on any row to update code, name, suffix, or status.
+                    </p>
                   </div>
                   <button
                     type="button"
-                    onClick={loadIndexes}
+                    onClick={() => void indexesResult.refetch()}
                     className="gemini-button px-3 py-1.5 text-xs"
                     disabled={isIndexesLoading || isAdding || isDeleting || isUpdating}
                   >
@@ -588,9 +597,7 @@ export function ControlShell({
                             </span>
                           </div>
                           <p className="mt-1 truncate text-sm text-gemini-text-secondary">{idx.name}</p>
-                          <p className="mt-1 text-xs text-gemini-text-tertiary">
-                            Suffix: {idx.yfinance_suffix || '-'}
-                          </p>
+                          <p className="mt-1 text-xs text-gemini-text-tertiary">Suffix: {idx.yfinance_suffix || '-'}</p>
                         </div>
 
                         <div className="flex flex-wrap justify-end gap-2">
@@ -599,10 +606,21 @@ export function ControlShell({
                             onClick={() => openEditIndex(idx)}
                             className="gemini-button-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
                             aria-label={`Edit index ${idx.code}`}
-                            disabled={isDeleting || isAdding || isUpdating}
+                            disabled={!ADMIN_ACTIONS_ENABLED || isDeleting || isAdding || isUpdating}
                           >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.9 3.1a2.8 2.8 0 1 1 4 4L9 19l-5 1 1-5L16.9 3.1Z" />
+                            <svg
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M16.9 3.1a2.8 2.8 0 1 1 4 4L9 19l-5 1 1-5L16.9 3.1Z"
+                              />
                             </svg>
                             Edit Index
                           </button>
@@ -610,7 +628,7 @@ export function ControlShell({
                             type="button"
                             onClick={() => setPendingDelete(idx)}
                             className="gemini-button border-gemini-accent-red/35 px-3 py-1.5 text-xs text-gemini-accent-red"
-                            disabled={isDeleting || isAdding || isUpdating}
+                            disabled={!ADMIN_ACTIONS_ENABLED || isDeleting || isAdding || isUpdating}
                           >
                             Delete
                           </button>
@@ -680,11 +698,7 @@ export function ControlShell({
                       >
                         Cancel
                       </button>
-                      <button
-                        type="submit"
-                        className="gemini-button-primary px-3 py-1.5 text-sm"
-                        disabled={isUpdating}
-                      >
+                      <button type="submit" className="gemini-button-primary px-3 py-1.5 text-sm" disabled={isUpdating}>
                         {isUpdating ? 'Saving...' : 'Save Changes'}
                       </button>
                     </div>

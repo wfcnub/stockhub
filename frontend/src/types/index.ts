@@ -380,7 +380,7 @@ export const TIME_RANGES = [
   { label: 'ALL', value: 'ALL' as const },
 ];
 
-export type TimeRangeValue = typeof TIME_RANGES[number]['value'];
+export type TimeRangeValue = (typeof TIME_RANGES)[number]['value'];
 
 // ============ MA Period Options ============
 
