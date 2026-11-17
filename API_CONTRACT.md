@@ -1,4 +1,4 @@
-# StockHub API Contract (v1.1.0)
+# StockHub API Contract (v1.1.1)
 
 > **Source of Truth** - This document defines the API contract. Backend must implement these endpoints. Frontend must consume these endpoints.
 
@@ -902,15 +902,24 @@ Returns per-ticker sync status summary.
 ## 10. Health and Root
 
 ### GET /health
+Checks the database with `SELECT 1`.
+
+`200 OK`:
 ```json
 { "status": "healthy" }
 ```
 
+`503 Service Unavailable` when the database does not answer:
+```json
+{ "status": "unhealthy", "detail": "database unavailable" }
+```
+
 ### GET /
+`version` is the backend package version (`app.__version__`).
 ```json
 {
   "message": "StockHub API",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
 ```
 
@@ -981,6 +990,7 @@ Set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.1 | 2026-11-15 | `GET /health` now checks the database and returns `503` with `{status: unhealthy}` when it is unavailable. `GET /` reports the backend package version (`1.1.0`). Fixed route order so `GET /indicators/available-types` is no longer shadowed by `/indicators/{ticker_symbol}`. No request or response shape changes otherwise. |
 | 1.1.0 | 2026-04-28 | Stable triangle feature release: Full documentation of `/charts/{ticker_symbol}/triangles` and `/screener/triangles` endpoints with triangle-type (symmetrical, ascending, descending), state (potential, breakout), direction (bullish, bearish), confidence progression (1-2+ closes), volume ratio, and all supporting query parameters. Triangle detection is on-demand from existing `prices` data (no schema changes). Frontend integration complete with ticker chart overlays and screener mode switching. Also aligned invalidation logic across screener and chart divergence endpoints: backend now uses `low <= invalidation_level` (was `close`), emerging events are now checked for invalidation alongside aggressive, chart endpoint (`/charts/{ticker_symbol}/divergences`) now supports `include_invalidated` param and returns `is_invalidated` per row and `include_invalidated` in response envelope to match screener behavior. Frontend TickerChart now uses server-provided `is_invalidated` instead of client-side duplicate logic. |
 | 1.0.7 | 2026-04-18 | Added optional `breakout_relaxed` query param to triangle endpoints (`/charts/{ticker_symbol}/triangles`, `/screener/triangles`) to use lower breakout buffer and increase breakout sensitivity. Also fixed triangle formation validation window so boundary fitting excludes most recent bars; this enables valid breakout detection instead of suppressing breakout states. |
 | 1.0.6 | 2026-04-18 | Added triangle credibility metrics to triangle event payloads: `upper_touch_count`, `lower_touch_count`, and `total_touch_count` for both ticker and screener triangle endpoints. |

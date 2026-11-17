@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
-from typing import Optional
 import json
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models import Ticker, DailyPrice, KeyMetric, Index, TechnicalIndicator
+from app.models import DailyPrice, Index, KeyMetric, TechnicalIndicator, Ticker
 
 router = APIRouter(prefix="/tickers", tags=["tickers"])
 
@@ -20,7 +21,7 @@ def get_tickers(
     skip: Optional[int] = Query(None, ge=0, description="Alias for offset"),
     sort_by: str = Query("symbol", description="Sort field: symbol or name"),
     sort_order: str = Query("asc", description="Sort order: asc or desc"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get all tickers with optional filters.
@@ -41,10 +42,7 @@ def get_tickers(
     if search:
         search_term = f"%{search.upper()}%"
         query = query.filter(
-            or_(
-                Ticker.symbol.ilike(search_term),
-                Ticker.name.ilike(f"%{search}%")
-            )
+            or_(Ticker.symbol.ilike(search_term), Ticker.name.ilike(f"%{search}%"))
         )
 
     sort_field = sort_by.lower()
@@ -80,10 +78,10 @@ def get_tickers(
                 "name": t.name,
                 "sector": t.sector,
                 "industry": t.industry,
-                "index": t.index.code if t.index else None
+                "index": t.index.code if t.index else None,
             }
             for t in tickers
-        ]
+        ],
     }
 
 
@@ -99,9 +97,12 @@ def get_ticker(symbol: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Ticker not found")
 
     # Get latest key metrics
-    latest_metrics = db.query(KeyMetric).filter(
-        KeyMetric.ticker_id == ticker.id
-    ).order_by(KeyMetric.observation_date.desc()).first()
+    latest_metrics = (
+        db.query(KeyMetric)
+        .filter(KeyMetric.ticker_id == ticker.id)
+        .order_by(KeyMetric.observation_date.desc())
+        .first()
+    )
 
     # Get index info
     index = db.query(Index).filter(Index.id == ticker.index_id).first()
@@ -111,7 +112,7 @@ def get_ticker(symbol: str, db: Session = Depends(get_db)):
         "name": ticker.name,
         "sector": ticker.sector,
         "industry": ticker.industry,
-        "index": index.code if index else None
+        "index": index.code if index else None,
     }
 
     # Add key metrics if available
@@ -123,7 +124,7 @@ def get_ticker(symbol: str, db: Session = Depends(get_db)):
             "dividend_yield": latest_metrics.dividend_yield,
             "eps": latest_metrics.eps,
             "roe": latest_metrics.roe,
-            "observation_date": latest_metrics.observation_date.isoformat()
+            "observation_date": latest_metrics.observation_date.isoformat(),
         }
     else:
         response["key_metrics"] = None
@@ -137,7 +138,7 @@ def get_ticker_chart(
     range: str = Query("ALL", description="Preset range: 1M, 3M, 6M, 1Y, 5Y, ALL"),
     ma_periods: str = Query("10,15,20,50,100,200", description="Comma-separated MA periods"),
     macd_ma_type: str = Query("sma", description="MACD moving-average mode: sma or ema"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get chart data for ticker.
@@ -161,32 +162,35 @@ def get_ticker_chart(
         "6M": 180,
         "1Y": 365,
         "5Y": 1825,
-        "ALL": 3650  # 10 years
+        "ALL": 3650,  # 10 years
     }
     days = range_map.get(range.upper(), 3650)
     start_date = date.today() - timedelta(days=days)
 
     # Get price data
-    prices = db.query(DailyPrice).filter(
-        and_(
-            DailyPrice.ticker_id == ticker.id,
-            DailyPrice.date >= start_date
-        )
-    ).order_by(DailyPrice.date.asc()).all()
+    prices = (
+        db.query(DailyPrice)
+        .filter(and_(DailyPrice.ticker_id == ticker.id, DailyPrice.date >= start_date))
+        .order_by(DailyPrice.date.asc())
+        .all()
+    )
 
     if not prices:
         raise HTTPException(status_code=404, detail="No price data available for this ticker")
 
     # Parse MA periods
-    ma_periods_list = [int(p.strip()) for p in ma_periods.split(",") if p.strip().isdigit()]
+    # TODO: ma_periods is parsed but not applied (API_CONTRACT says it filters MAs); fix separately.
+    ma_periods_list = [int(p.strip()) for p in ma_periods.split(",") if p.strip().isdigit()]  # noqa: F841
 
     # Get all indicators for the date range
-    indicator_data = db.query(TechnicalIndicator).filter(
-        and_(
-            TechnicalIndicator.ticker_id == ticker.id,
-            TechnicalIndicator.date >= start_date
+    indicator_data = (
+        db.query(TechnicalIndicator)
+        .filter(
+            and_(TechnicalIndicator.ticker_id == ticker.id, TechnicalIndicator.date >= start_date)
         )
-    ).order_by(TechnicalIndicator.date.asc()).all()
+        .order_by(TechnicalIndicator.date.asc())
+        .all()
+    )
 
     # Group indicators by date
     indicators_by_date = {}
@@ -209,7 +213,7 @@ def get_ticker_chart(
                         macd_data["histogram"] = float(extra_data["histogram"])
                     if extra_data.get("ma_type") in {"sma", "ema"}:
                         macd_data["ma_type"] = str(extra_data["ma_type"])
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
 
         return macd_data
@@ -241,9 +245,7 @@ def get_ticker_chart(
             continue
 
         selected_macd = (
-            macd_modes.get(requested_macd_ma_type)
-            or macd_modes.get("sma")
-            or macd_modes.get("ema")
+            macd_modes.get(requested_macd_ma_type) or macd_modes.get("sma") or macd_modes.get("ema")
         )
         if selected_macd:
             values["macd"] = selected_macd
@@ -253,7 +255,7 @@ def get_ticker_chart(
         "symbol": ticker.symbol,
         "range": range,
         "macd_ma_type": requested_macd_ma_type,
-        "data": []
+        "data": [],
     }
 
     for p in prices:
@@ -265,9 +267,9 @@ def get_ticker_chart(
                 "high": float(p.high) if p.high else None,
                 "low": float(p.low) if p.low else None,
                 "close": float(p.close),
-                "volume": int(p.volume) if p.volume else None
+                "volume": int(p.volume) if p.volume else None,
             },
-            "indicators": indicators_by_date.get(p.date, {})
+            "indicators": indicators_by_date.get(p.date, {}),
         }
         chart_data["data"].append(data_point)
 

@@ -156,9 +156,7 @@ class TriangleDetectorService:
 
     def _effective_breakout_buffer_ratio(self) -> float:
         multiplier = (
-            self.config.relaxed_breakout_buffer_multiplier
-            if self.config.breakout_relaxed
-            else 1.0
+            self.config.relaxed_breakout_buffer_multiplier if self.config.breakout_relaxed else 1.0
         )
         effective_pct = max(0.0, self.config.breakout_buffer_pct * max(0.0, multiplier))
         return effective_pct / 100.0
@@ -218,8 +216,8 @@ class TriangleDetectorService:
 
         for idx in range(left, len(bars) - right):
             candidate = highs[idx]
-            left_values = highs[idx - left:idx]
-            right_values = highs[idx + 1:idx + right + 1] if right > 0 else []
+            left_values = highs[idx - left : idx]
+            right_values = highs[idx + 1 : idx + right + 1] if right > 0 else []
 
             if all(candidate > value for value in left_values) and all(
                 candidate > value for value in right_values
@@ -240,8 +238,8 @@ class TriangleDetectorService:
 
         for idx in range(left, len(bars) - right):
             candidate = lows[idx]
-            left_values = lows[idx - left:idx]
-            right_values = lows[idx + 1:idx + right + 1] if right > 0 else []
+            left_values = lows[idx - left : idx]
+            right_values = lows[idx + 1 : idx + right + 1] if right > 0 else []
 
             if all(candidate < value for value in left_values) and all(
                 candidate < value for value in right_values
@@ -335,9 +333,9 @@ class TriangleDetectorService:
                     0.0,
                     1.0,
                 )
-                boundary_tolerance_ratio = (
-                    early_tolerance_ratio * (1.0 - tighten_progress)
-                ) + (late_tolerance_ratio * tighten_progress)
+                boundary_tolerance_ratio = (early_tolerance_ratio * (1.0 - tighten_progress)) + (
+                    late_tolerance_ratio * tighten_progress
+                )
                 boundary_tolerances = np.maximum(
                     tolerance,
                     np.maximum(np.abs(eval_line_values), np.abs(eval_prices))
@@ -348,9 +346,7 @@ class TriangleDetectorService:
                     continue
 
                 candidate_pivots = [
-                    idx
-                    for idx in candidate_pairs
-                    if start_index <= idx < eval_end_index
+                    idx for idx in candidate_pairs if start_index <= idx < eval_end_index
                 ]
                 if len(candidate_pivots) < 2:
                     continue
@@ -367,14 +363,15 @@ class TriangleDetectorService:
                     np.maximum(
                         np.abs(pivot_line_values),
                         np.abs(pivot_prices),
-                    ) * touch_tolerance_ratio,
+                    )
+                    * touch_tolerance_ratio,
                 )
                 touch_count = int(np.sum(np.abs(pivot_boundary_diff) <= touch_tolerances))
                 span = int(j - i)
 
                 pattern_length = int((len(bars) - 1) - start_index)
                 recent_start = max(start_index, len(bars) - recent_window)
-                recent_line_values = line_values[recent_start:len(bars)]
+                recent_line_values = line_values[recent_start : len(bars)]
                 if len(recent_line_values) == 0:
                     continue
                 recent_avg_height = float(np.mean(recent_line_values))
@@ -663,9 +660,7 @@ class TriangleDetectorService:
             color_hex = "#06B6D4"
             signal_index = last_index
             invalidation_level = None
-            action = (
-                f"Potential {triangle_type} triangle compression. Await breakout confirmation."
-            )
+            action = f"Potential {triangle_type} triangle compression. Await breakout confirmation."
         else:
             line_style = "solid"
             signal_index = max(0, len(bars) - breakout_close_count)
@@ -674,18 +669,14 @@ class TriangleDetectorService:
                 color_hex = "#22C55E"
                 invalidation_level = lower_now
                 if breakout_close_count >= 2:
-                    action = (
-                        f"Bullish triangle breakout confirmed ({breakout_close_count} closes)."
-                    )
+                    action = f"Bullish triangle breakout confirmed ({breakout_close_count} closes)."
                 else:
                     action = "Bullish triangle breakout signaled (1 close)."
             else:
                 color_hex = "#EF4444"
                 invalidation_level = upper_now
                 if breakout_close_count >= 2:
-                    action = (
-                        f"Bearish triangle breakout confirmed ({breakout_close_count} closes)."
-                    )
+                    action = f"Bearish triangle breakout confirmed ({breakout_close_count} closes)."
                 else:
                     action = "Bearish triangle breakout signaled (1 close)."
 
@@ -724,9 +715,7 @@ class TriangleDetectorService:
             apex_timestamp=self._to_unix_seconds(apex_date),
             signal_timestamp=self._to_unix_seconds(bars[signal_index].date),
             invalidation_level=(
-                round(invalidation_level, 4)
-                if invalidation_level is not None
-                else None
+                round(invalidation_level, 4) if invalidation_level is not None else None
             ),
             action=action,
         )
@@ -760,9 +749,8 @@ class TriangleDetectorService:
                 pattern_start_index = idx
                 break
 
-        gap_start = (
-            upper_line.y(float(pattern_start_index))
-            - lower_line.y(float(pattern_start_index))
+        gap_start = upper_line.y(float(pattern_start_index)) - lower_line.y(
+            float(pattern_start_index)
         )
         gap_end = upper_line.y(last_index) - lower_line.y(last_index)
 
@@ -837,7 +825,7 @@ class TriangleDetectorService:
 
         recent_volumes = [
             bar.volume
-            for bar in bars[-self.config.volume_avg_window:]
+            for bar in bars[-self.config.volume_avg_window :]
             if bar.volume is not None and bar.volume > 0
         ]
         latest_volume = bars[-1].volume
@@ -879,9 +867,8 @@ class TriangleDetectorService:
     ) -> List[Dict[str, object]]:
         cutoff_timestamp = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
 
-        tickers_query = (
-            self.db.query(Ticker.id, Ticker.symbol, Ticker.name)
-            .filter(Ticker.is_active)
+        tickers_query = self.db.query(Ticker.id, Ticker.symbol, Ticker.name).filter(
+            Ticker.is_active
         )
         if index_id is not None:
             tickers_query = tickers_query.filter(Ticker.index_id == index_id)

@@ -1,4 +1,5 @@
 from typing import List
+
 import pandas as pd
 
 from .base import BaseIndicator, IndicatorResult
@@ -43,15 +44,14 @@ class SMA(BaseIndicator):
         """
         df = self.prepare_dataframe(df)
 
-        sma = df['close'].rolling(window=self.window).mean()
+        sma = df["close"].rolling(window=self.window).mean()
 
         results = []
         for idx in range(len(df)):
             if not pd.isna(sma.iloc[idx]):
-                results.append(IndicatorResult(
-                    date=df.iloc[idx]['date'],
-                    value=float(sma.iloc[idx])
-                ))
+                results.append(
+                    IndicatorResult(date=df.iloc[idx]["date"], value=float(sma.iloc[idx]))
+                )
 
         return results
 
@@ -97,15 +97,14 @@ class EMA(BaseIndicator):
 
         # Calculate EMA using pandas ewm
         # span = window gives the correct smoothing factor: k = 2/(window+1)
-        ema = df['close'].ewm(span=self.window, adjust=False).mean()
+        ema = df["close"].ewm(span=self.window, adjust=False).mean()
 
         results = []
         for idx in range(len(df)):
             # EMA needs at least 'window' periods for a stable calculation
             if idx >= self.window - 1:
-                results.append(IndicatorResult(
-                    date=df.iloc[idx]['date'],
-                    value=float(ema.iloc[idx])
-                ))
+                results.append(
+                    IndicatorResult(date=df.iloc[idx]["date"], value=float(ema.iloc[idx]))
+                )
 
         return results

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models import Ticker
-from app.services.divergence_detector import DivergenceDetectorService, DivergenceConfig
+from app.services.divergence_detector import DivergenceConfig, DivergenceDetectorService
 
 router = APIRouter(tags=["divergences"])
 
@@ -79,10 +79,14 @@ def get_ticker_divergences(
     ),
     db: Session = Depends(get_db),
 ):
-    ticker = db.query(Ticker).filter(
-        Ticker.symbol == ticker_symbol.upper(),
-        Ticker.is_active,
-    ).first()
+    ticker = (
+        db.query(Ticker)
+        .filter(
+            Ticker.symbol == ticker_symbol.upper(),
+            Ticker.is_active,
+        )
+        .first()
+    )
 
     if not ticker:
         raise HTTPException(status_code=404, detail="Ticker not found")

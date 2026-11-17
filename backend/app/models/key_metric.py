@@ -1,4 +1,13 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, Date, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -7,9 +16,10 @@ from app.db.database import Base
 
 class KeyMetric(Base):
     """Time-series fundamental metrics for tickers"""
+
     __tablename__ = "key_metrics"
     __table_args__ = (
-        UniqueConstraint('ticker_id', 'observation_date', name='uq_ticker_observation'),
+        UniqueConstraint("ticker_id", "observation_date", name="uq_ticker_observation"),
     )
 
     id = Column(BigInteger, primary_key=True, index=True)

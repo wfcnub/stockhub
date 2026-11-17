@@ -26,6 +26,8 @@ This file briefs coding agents working in this repository.
   - `frontend/src/app/`: route pages (`/`, `/tickers`, `/tickers/[symbol]`, `/screener`).
   - `frontend/src/components/`: feature components (landing, charts, screener, ticker).
   - `frontend/src/lib/api.ts`: frontend API client (must stay contract-aligned).
+  - `frontend/src/lib/chartTheme.ts`: chart colours derived from the CSS variables in `globals.css`.
+  - `frontend/src/lib/` must stay tracked: Python ignore rules in `.gitignore` are anchored to `/backend/`; never add unanchored `lib/`, `build/`, `dist/` or `env/` rules.
   - `frontend/src/types/index.ts`: request/response types (must stay contract-aligned).
 - Root scripts:
   - `start.sh`: one-command local startup (DB + backend + frontend).
@@ -36,8 +38,14 @@ This file briefs coding agents working in this repository.
 - Full stack local run:
   - `./start.sh`
   - `./stop.sh`
-- Backend local:
-  - `cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000`
+- Backend local (Python 3.14, managed by uv; dependencies in `backend/pyproject.toml` and `backend/uv.lock`):
+  - `cd backend && uv sync`
+  - `cd backend && uv run uvicorn app.main:app --reload --port 8000`
+- Backend quality gates (CI runs the same):
+  - `cd backend && uv run ruff check . && uv run ruff format --check .`
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run mypy app` (informational until the models move to `Mapped[]`)
+  - Add or change dependencies with `uv add` / `uv add --dev`, never by hand-editing `uv.lock`.
 - Frontend local:
   - `cd frontend && npm run dev`
 - Frontend quality gates:

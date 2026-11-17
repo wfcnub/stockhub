@@ -1,4 +1,14 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Float, Date, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -7,9 +17,7 @@ from app.db.database import Base
 
 class DailyPrice(Base):
     __tablename__ = "prices"
-    __table_args__ = (
-        UniqueConstraint('ticker_id', 'date', name='uq_ticker_date'),
-    )
+    __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_ticker_date"),)
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"), nullable=False, index=True)
