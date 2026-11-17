@@ -32,6 +32,10 @@ type NormalizedGrade = 'oversold' | 'neutral';
 const DEFAULT_ITEMS_PER_PAGE = 10;
 const ITEMS_PER_PAGE_OPTIONS = [10, 20, 50] as const;
 
+// Contract allows 1-30 days for /screener/divergences and /screener/triangles.
+const DEFAULT_LOOKBACK_DAYS = 7;
+const LOOKBACK_DAYS_OPTIONS = [1, 3, 7, 14, 30] as const;
+
 const DEFAULT_PIVOT_LEFT_WINDOW = 5;
 const DEFAULT_CONFIRMED_RIGHT_MIN = 2;
 const DEFAULT_CONFIRMED_RIGHT_MAX = 5;
@@ -293,6 +297,11 @@ function ScreenerContent() {
     ? initialPageValue - 1
     : 0;
 
+  const initialLookbackDaysValue = Number(searchParams.get('days'));
+  const initialLookbackDays = LOOKBACK_DAYS_OPTIONS.some((option) => option === initialLookbackDaysValue)
+    ? initialLookbackDaysValue
+    : DEFAULT_LOOKBACK_DAYS;
+
   const initialPivotLeft = Number(searchParams.get('pivot_left')) || DEFAULT_PIVOT_LEFT_WINDOW;
   const initialConfirmedMin = Number(searchParams.get('conf_min')) || DEFAULT_CONFIRMED_RIGHT_MIN;
   const initialConfirmedMax = Number(searchParams.get('conf_max')) || DEFAULT_CONFIRMED_RIGHT_MAX;
@@ -359,6 +368,7 @@ function ScreenerContent() {
   const [itemsPerPage, setItemsPerPage] = useState(initialItemsPerPage);
   const [page, setPage] = useState(initialPage);
 
+  const [lookbackDays, setLookbackDays] = useState(initialLookbackDays);
   const [pivotLeftWindow, setPivotLeftWindow] = useState(initialPivotLeft);
   const [confirmedRightMin, setConfirmedRightMin] = useState(initialConfirmedMin);
   const [confirmedRightMax, setConfirmedRightMax] = useState(initialConfirmedMax);
@@ -438,7 +448,7 @@ function ScreenerContent() {
         aggressive_right_max: aggressiveRightMax,
         include_invalidated: includeInvalidated,
       };
-      const response = await getDivergenceScreener(7, params);
+      const response = await getDivergenceScreener(lookbackDays, params);
       const normalizedResults = response.results.map((item) => {
         const itemWithAliases = item as DivergenceScreenerItem & DivergenceItemAliases;
         const signalType = normalizeSignalType(
@@ -517,7 +527,7 @@ function ScreenerContent() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [pivotLeftWindow, confirmedRightMin, confirmedRightMax, aggressiveRightMin, aggressiveRightMax, includeInvalidated]);
+  }, [lookbackDays, pivotLeftWindow, confirmedRightMin, confirmedRightMax, aggressiveRightMin, aggressiveRightMax, includeInvalidated]);
 
   const loadTriangleSignals = useCallback(async (refresh = false) => {
     if (refresh) {
@@ -554,7 +564,7 @@ function ScreenerContent() {
         limit: 500,
       };
 
-      const response = await getTriangleScreener(7, params);
+      const response = await getTriangleScreener(lookbackDays, params);
       setTriangleResults(response.results);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load triangle screener');
@@ -564,6 +574,7 @@ function ScreenerContent() {
       setIsRefreshing(false);
     }
   }, [
+    lookbackDays,
     triangleIncludePotential,
     triangleIncludeBreakouts,
     triangleStateFilter,
@@ -602,6 +613,7 @@ function ScreenerContent() {
 
     if (itemsPerPage !== DEFAULT_ITEMS_PER_PAGE) params.set('page_size', String(itemsPerPage));
     if (page > 0) params.set('page', String(page + 1));
+    if (lookbackDays !== DEFAULT_LOOKBACK_DAYS) params.set('days', String(lookbackDays));
 
     if (mode === 'divergence') {
       if (pivotLeftWindow !== DEFAULT_PIVOT_LEFT_WINDOW) params.set('pivot_left', String(pivotLeftWindow));
@@ -636,6 +648,7 @@ function ScreenerContent() {
     mode,
     itemsPerPage,
     page,
+    lookbackDays,
     pivotLeftWindow,
     confirmedRightMin,
     confirmedRightMax,
@@ -742,6 +755,11 @@ function ScreenerContent() {
     const start = page * itemsPerPage;
     return filteredTriangleResults.slice(start, start + itemsPerPage);
   }, [filteredTriangleResults, itemsPerPage, page]);
+
+  const handleLookbackDaysChange = (value: number) => {
+    setLookbackDays(LOOKBACK_DAYS_OPTIONS.some((option) => option === value) ? value : DEFAULT_LOOKBACK_DAYS);
+    setPage(0);
+  };
 
   const handleItemsPerPageChange = (value: number) => {
     const nextItemsPerPage = ITEMS_PER_PAGE_OPTIONS.some((size) => size === value)
@@ -1161,6 +1179,24 @@ function ScreenerContent() {
               </div>
 
               <div>
+                <label htmlFor="lookbackDays" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                  Lookback
+                </label>
+                <select
+                  id="lookbackDays"
+                  value={lookbackDays}
+                  onChange={(event) => handleLookbackDaysChange(Number(event.target.value))}
+                  className="gemini-select min-w-[140px]"
+                >
+                  {LOOKBACK_DAYS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 1 ? '1 day' : `${option} days`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label htmlFor="itemsPerPage" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
                   Items / Page
                 </label>
@@ -1296,6 +1332,24 @@ function ScreenerContent() {
                 >
                   {triangleBreakoutRelaxed ? 'Relaxed' : 'Standard'}
                 </button>
+              </div>
+
+              <div>
+                <label htmlFor="lookbackDaysTriangle" className="mb-1 block text-xs uppercase tracking-[0.14em] text-gemini-text-tertiary">
+                  Lookback
+                </label>
+                <select
+                  id="lookbackDaysTriangle"
+                  value={lookbackDays}
+                  onChange={(event) => handleLookbackDaysChange(Number(event.target.value))}
+                  className="gemini-select min-w-[140px]"
+                >
+                  {LOOKBACK_DAYS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 1 ? '1 day' : `${option} days`}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
