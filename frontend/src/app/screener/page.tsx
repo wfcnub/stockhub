@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ControlShell } from '@/components/layout/ControlShell';
 import { divergenceScreenerQuery, triangleScreenerQuery } from '@/lib/queries';
+import { parseBooleanParam, parseBoundedInteger } from '@/lib/urlParams';
 import type { DivergenceConfigParams } from '@/lib/api';
 import type {
   BreakoutDirection,
@@ -197,29 +198,6 @@ function toTriangleDirectionFilter(value: string | null): TriangleDirectionFilte
   return 'all';
 }
 
-function toBooleanQueryValue(value: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-}
-
-function toBoundedInteger(value: string | null, fallback: number, minimum: number, maximum: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  const rounded = Math.round(parsed);
-  if (rounded < minimum || rounded > maximum) {
-    return fallback;
-  }
-
-  return rounded;
-}
-
 function normalizeIndexCode(value: string): string {
   return value.trim().toUpperCase();
 }
@@ -367,42 +345,43 @@ function ScreenerContent() {
     ? initialLookbackDaysValue
     : DEFAULT_LOOKBACK_DAYS;
 
-  const initialPivotLeft = Number(searchParams.get('pivot_left')) || DEFAULT_PIVOT_LEFT_WINDOW;
-  const initialConfirmedMin = Number(searchParams.get('conf_min')) || DEFAULT_CONFIRMED_RIGHT_MIN;
-  const initialConfirmedMax = Number(searchParams.get('conf_max')) || DEFAULT_CONFIRMED_RIGHT_MAX;
-  const initialAggressiveMin = Number(searchParams.get('agg_min')) || DEFAULT_AGGRESSIVE_RIGHT_MIN;
-  const initialAggressiveMax = Number(searchParams.get('agg_max')) || DEFAULT_AGGRESSIVE_RIGHT_MAX;
-  const initialAuditMode = toBooleanQueryValue(searchParams.get('audit'));
+  const initialPivotLeft = parseBoundedInteger(searchParams.get('pivot_left'), DEFAULT_PIVOT_LEFT_WINDOW, 1, 20);
+  const initialConfirmedMin = parseBoundedInteger(searchParams.get('conf_min'), DEFAULT_CONFIRMED_RIGHT_MIN, 0, 10);
+  const initialConfirmedMax = parseBoundedInteger(searchParams.get('conf_max'), DEFAULT_CONFIRMED_RIGHT_MAX, 0, 10);
+  const initialAggressiveMin = parseBoundedInteger(searchParams.get('agg_min'), DEFAULT_AGGRESSIVE_RIGHT_MIN, 0, 10);
+  const initialAggressiveMax = parseBoundedInteger(searchParams.get('agg_max'), DEFAULT_AGGRESSIVE_RIGHT_MAX, 0, 10);
+  const initialAuditMode = parseBooleanParam(searchParams.get('audit'), false);
 
   const initialTriangleTypeFilter = toTriangleTypeFilter(searchParams.get('tri_type'));
   const initialTriangleStateFilter = toTriangleStateFilter(searchParams.get('tri_state'));
   const initialTriangleDirectionFilter = toTriangleDirectionFilter(searchParams.get('tri_dir'));
-  const initialTriangleMinConfidence = toBoundedInteger(
+  const initialTriangleMinConfidence = parseBoundedInteger(
     searchParams.get('tri_min_conf'),
     DEFAULT_TRIANGLE_MIN_CONFIDENCE,
     0,
     100,
   );
-  const rawTrianglePotential = searchParams.get('tri_potential');
-  const rawTriangleBreakout = searchParams.get('tri_breakout');
-  const initialTriangleIncludePotential =
-    rawTrianglePotential === null ? true : toBooleanQueryValue(rawTrianglePotential);
-  const initialTriangleIncludeBreakouts =
-    rawTriangleBreakout === null ? true : toBooleanQueryValue(rawTriangleBreakout);
-  const initialTriangleLookbackBars = toBoundedInteger(
+  const initialTriangleIncludePotential = parseBooleanParam(searchParams.get('tri_potential'), true);
+  const initialTriangleIncludeBreakouts = parseBooleanParam(searchParams.get('tri_breakout'), true);
+  const initialTriangleLookbackBars = parseBoundedInteger(
     searchParams.get('tri_lookback'),
     DEFAULT_TRIANGLE_LOOKBACK_BARS,
     30,
     180,
   );
-  const initialTrianglePivotLeft = toBoundedInteger(searchParams.get('tri_left'), DEFAULT_TRIANGLE_PIVOT_LEFT, 1, 10);
-  const initialTrianglePivotRight = toBoundedInteger(
+  const initialTrianglePivotLeft = parseBoundedInteger(
+    searchParams.get('tri_left'),
+    DEFAULT_TRIANGLE_PIVOT_LEFT,
+    1,
+    10,
+  );
+  const initialTrianglePivotRight = parseBoundedInteger(
     searchParams.get('tri_right'),
     DEFAULT_TRIANGLE_PIVOT_RIGHT,
     0,
     10,
   );
-  const initialTriangleBreakoutRelaxed = toBooleanQueryValue(searchParams.get('tri_breakout_relaxed'));
+  const initialTriangleBreakoutRelaxed = parseBooleanParam(searchParams.get('tri_breakout_relaxed'), false);
   const initialTriangleIndexCode = normalizeIndexCode(searchParams.get('tri_index') || '');
 
   const [mode, setMode] = useState<ScreenerMode>(initialMode);

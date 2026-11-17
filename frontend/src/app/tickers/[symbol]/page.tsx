@@ -16,6 +16,7 @@ import type {
 import { chartQuery, tickerDivergencesQuery, tickerQuery, tickerTrianglesQuery } from '@/lib/queries';
 import { KeyMetrics, TickerChart, MACDChart } from '@/components/ticker';
 import { ControlShell } from '@/components/layout/ControlShell';
+import { parseBooleanParam, parseBoundedInteger } from '@/lib/urlParams';
 
 // Stable empty references so memoised values do not change identity on every render.
 const EMPTY_CHART_DATA: ChartDataPoint[] = [];
@@ -28,29 +29,6 @@ const DEFAULT_TRIANGLE_LOOKBACK_BARS = 60;
 const DEFAULT_TRIANGLE_PIVOT_LEFT = 3;
 const DEFAULT_TRIANGLE_PIVOT_RIGHT = 1;
 const DEFAULT_TRIANGLE_MIN_CONFIDENCE = 0;
-
-function toBoundedInteger(value: string | null, fallback: number, minimum: number, maximum: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  const rounded = Math.round(parsed);
-  if (rounded < minimum || rounded > maximum) {
-    return fallback;
-  }
-
-  return rounded;
-}
-
-function toBooleanQueryValue(value: string | null): boolean {
-  if (value === null) {
-    return true;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-}
 
 function normalizeIndexCode(value: string): string {
   return value.trim().toUpperCase();
@@ -70,19 +48,23 @@ export default function TickerDetailPage() {
       return undefined;
     }
 
-    const lookbackBars = toBoundedInteger(searchParams.get('tri_lookback'), DEFAULT_TRIANGLE_LOOKBACK_BARS, 30, 180);
-    const pivotLeftWindow = toBoundedInteger(searchParams.get('tri_left'), DEFAULT_TRIANGLE_PIVOT_LEFT, 1, 10);
-    const pivotRightWindow = toBoundedInteger(searchParams.get('tri_right'), DEFAULT_TRIANGLE_PIVOT_RIGHT, 0, 10);
-    const minConfidence = toBoundedInteger(searchParams.get('tri_min_conf'), DEFAULT_TRIANGLE_MIN_CONFIDENCE, 0, 100);
+    const lookbackBars = parseBoundedInteger(searchParams.get('tri_lookback'), DEFAULT_TRIANGLE_LOOKBACK_BARS, 30, 180);
+    const pivotLeftWindow = parseBoundedInteger(searchParams.get('tri_left'), DEFAULT_TRIANGLE_PIVOT_LEFT, 1, 10);
+    const pivotRightWindow = parseBoundedInteger(searchParams.get('tri_right'), DEFAULT_TRIANGLE_PIVOT_RIGHT, 0, 10);
+    const minConfidence = parseBoundedInteger(
+      searchParams.get('tri_min_conf'),
+      DEFAULT_TRIANGLE_MIN_CONFIDENCE,
+      0,
+      100,
+    );
 
     const triType = searchParams.get('tri_type');
     const triState = searchParams.get('tri_state');
     const triDirection = searchParams.get('tri_dir');
 
-    const includePotential = toBooleanQueryValue(searchParams.get('tri_potential'));
-    const includeBreakouts = toBooleanQueryValue(searchParams.get('tri_breakout'));
-    const rawBreakoutRelaxed = searchParams.get('tri_breakout_relaxed');
-    const breakoutRelaxed = rawBreakoutRelaxed === null ? false : toBooleanQueryValue(rawBreakoutRelaxed);
+    const includePotential = parseBooleanParam(searchParams.get('tri_potential'), true);
+    const includeBreakouts = parseBooleanParam(searchParams.get('tri_breakout'), true);
+    const breakoutRelaxed = parseBooleanParam(searchParams.get('tri_breakout_relaxed'), false);
 
     const triangleTypes =
       triType === 'ascending' || triType === 'descending' || triType === 'symmetrical'
