@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,15 +8,29 @@ from sqlalchemy import text
 
 from app import __version__
 from app.config import settings
-from app.db.database import engine
+from app.db.database import SessionLocal, engine
 from app.routers import divergences, indexes, indicators, prices, stats, sync, tickers, triangles
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Jobs left `in_progress` by a crashed or restarted worker are marked failed on startup.
+    try:
+        from app.sync.runner import recover_stale_jobs
+
+        recover_stale_jobs(SessionLocal)
+    except Exception:
+        logger.warning("Stale sync job recovery skipped (database unavailable?)", exc_info=True)
+    yield
+
 
 app = FastAPI(
     title="StockHub API",
     description="API for stock data management and technical analysis",
     version=__version__,
+    lifespan=lifespan,
 )
 
 app.add_middleware(

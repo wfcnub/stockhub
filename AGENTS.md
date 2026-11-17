@@ -40,12 +40,20 @@ This file briefs coding agents working in this repository.
   - `./stop.sh`
 - Backend local (Python 3.14, managed by uv; dependencies in `backend/pyproject.toml` and `backend/uv.lock`):
   - `cd backend && uv sync`
+  - `cd backend && uv run alembic upgrade head` (PostgreSQL 18 only; `DATABASE_URL` required)
+  - Local test PostgreSQL (user-space, no root, gitignored `backend/.local-pg/`): `cd backend && scripts/local-pg.sh setup`, then `LOCAL_PG=1 uv run pytest`; remove it with `scripts/local-pg.sh destroy`. `TEST_DATABASE_URL` takes precedence; CI uses its own PostgreSQL 18 service.
   - `cd backend && uv run uvicorn app.main:app --reload --port 8000`
 - Backend quality gates (CI runs the same):
   - `cd backend && uv run ruff check . && uv run ruff format --check .`
   - `cd backend && uv run pytest`
   - `cd backend && uv run mypy app` (informational until the models move to `Mapped[]`)
+  - Indicator golden tests (`tests/test_indicator_golden.py`) compare against committed TA-Lib vectors, a plain-Python reference and hand-computed cases. Regenerate the fixture only after a deliberate TA-Lib upgrade: `cd backend && uv run python -m tests.fixtures.generate_indicator_golden`. After an indicator fix is deployed, recompute stored values with `uv run python -m app.sync run --index JCI --full`.
   - Add or change dependencies with `uv add` / `uv add --dev`, never by hand-editing `uv.lock`.
+  - Schema changes: edit the models, `uv run alembic revision --autogenerate -m "..."`, review it, update `DB_DESIGN.md`. PostgreSQL tests run when `TEST_DATABASE_URL` points at a PostgreSQL 18 server whose role has CREATEDB.
+- Data sync (separate worker process; the API never runs syncs itself):
+  - `cd backend && uv run python -m app.sync run --index JCI` (options: `--start-date`, `--workers`, `--skip-ticker-list`, `--full`)
+  - `cd backend && uv run python -m app.sync recover` (mark jobs without a live worker as failed)
+  - Exit codes: 0 completed or cancelled, 1 failed, 2 completed with some ticker failures, 3 another sync for the index is running.
 - Frontend local:
   - `cd frontend && npm run dev`
 - Frontend quality gates:

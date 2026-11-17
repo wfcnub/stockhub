@@ -2,3 +2,4 @@
 .coverage
 coverage.xml
 htmlcov/
+.local-pg/
