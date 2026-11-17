@@ -92,17 +92,10 @@ export default function ScreenerFilters({ onFilter }: ScreenerFiltersProps) {
                 key={idx}
                 className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800"
               >
-                {AVAILABLE_INDICATORS.find(i => i.id === filter.indicator)?.name}
-                {' '}
-                {OPERATORS.find(o => o.id === filter.operator)?.label}
-                {' '}
-                {Array.isArray(filter.value)
-                  ? `${filter.value[0]} - ${filter.value[1]}`
-                  : filter.value}
-                <button
-                  onClick={() => removeFilter(idx)}
-                  className="ml-2 text-blue-600 hover:text-blue-800"
-                >
+                {AVAILABLE_INDICATORS.find((i) => i.id === filter.indicator)?.name}{' '}
+                {OPERATORS.find((o) => o.id === filter.operator)?.label}{' '}
+                {Array.isArray(filter.value) ? `${filter.value[0]} - ${filter.value[1]}` : filter.value}
+                <button onClick={() => removeFilter(idx)} className="ml-2 text-blue-600 hover:text-blue-800">
                   ×
                 </button>
               </span>
@@ -199,10 +192,7 @@ export default function ScreenerFilters({ onFilter }: ScreenerFiltersProps) {
         >
           Apply Filters
         </button>
-        <button
-          onClick={clearFilters}
-          className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
-        >
+        <button onClick={clearFilters} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
           Clear All
         </button>
       </div>

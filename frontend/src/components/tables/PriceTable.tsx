@@ -111,18 +111,14 @@ export default function PriceTable({ data, title }: PriceTableProps) {
           <tbody className="bg-white divide-y divide-gray-200">
             {sortedData.map((row, idx) => (
               <tr key={idx} className="hover:bg-gray-50">
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                  {row.date}
-                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.date}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right">
                   {formatNumber(row.open)}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-green-600 text-right">
                   {formatNumber(row.high)}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-red-600 text-right">
-                  {formatNumber(row.low)}
-                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-red-600 text-right">{formatNumber(row.low)}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
                   {formatNumber(row.close)}
                 </td>

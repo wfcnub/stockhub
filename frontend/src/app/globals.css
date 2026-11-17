@@ -86,7 +86,7 @@
 
   body {
     @apply text-gemini-text-primary antialiased;
-    font-family: "Manrope", "Plus Jakarta Sans", "Sora", "Avenir Next", sans-serif;
+    font-family: 'Manrope', 'Plus Jakarta Sans', 'Sora', 'Avenir Next', sans-serif;
     background-color: rgb(var(--gemini-bg-primary));
     background-image: linear-gradient(
       180deg,
@@ -95,11 +95,13 @@
       rgb(var(--gemini-bg-tertiary)) 100%
     );
     min-height: 100vh;
-    transition: background-color 0.26s cubic-bezier(0.22, 1, 0.36, 1), color 0.22s ease;
+    transition:
+      background-color 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+      color 0.22s ease;
   }
 
   body::before {
-    content: "";
+    content: '';
     position: fixed;
     left: 0;
     right: 0;
@@ -109,7 +111,9 @@
     background: radial-gradient(circle at 50% 0, var(--gemini-ambient-glow), transparent 68%);
     filter: blur(10px);
     z-index: -1;
-    transition: background 0.28s ease, opacity 0.28s ease;
+    transition:
+      background 0.28s ease,
+      opacity 0.28s ease;
   }
 
   /* Custom scrollbar */
@@ -187,7 +191,7 @@
   }
 
   .gemini-shimmer::after {
-    content: "";
+    content: '';
     @apply absolute inset-0;
     background: linear-gradient(90deg, transparent, var(--gemini-shimmer), transparent);
     animation: shimmer 2s infinite;
@@ -239,7 +243,7 @@
   }
 
   .hud-stage::before {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
     pointer-events: none;
@@ -318,8 +322,9 @@
 
   .border-glow {
     @apply border border-transparent;
-    background: linear-gradient(rgb(var(--gemini-surface)), rgb(var(--gemini-surface))) padding-box,
-                linear-gradient(120deg, rgb(var(--gemini-gradient-start)), rgb(var(--gemini-gradient-end))) border-box;
+    background:
+      linear-gradient(rgb(var(--gemini-surface)), rgb(var(--gemini-surface))) padding-box,
+      linear-gradient(120deg, rgb(var(--gemini-gradient-start)), rgb(var(--gemini-gradient-end))) border-box;
   }
 
   .animate-orbit {
@@ -381,24 +386,24 @@
     animation-duration: 0ms;
   }
 
-  html[data-theme-transition="ltr"]::view-transition-old(root),
-  html[data-theme-transition="rtl"]::view-transition-old(root) {
+  html[data-theme-transition='ltr']::view-transition-old(root),
+  html[data-theme-transition='rtl']::view-transition-old(root) {
     z-index: 1;
   }
 
-  html[data-theme-transition="ltr"]::view-transition-new(root),
-  html[data-theme-transition="rtl"]::view-transition-new(root) {
+  html[data-theme-transition='ltr']::view-transition-new(root),
+  html[data-theme-transition='rtl']::view-transition-new(root) {
     z-index: 2;
     animation-duration: 720ms;
     animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
     animation-fill-mode: both;
   }
 
-  html[data-theme-transition="ltr"]::view-transition-new(root) {
+  html[data-theme-transition='ltr']::view-transition-new(root) {
     animation-name: themeRevealLeftToRight;
   }
 
-  html[data-theme-transition="rtl"]::view-transition-new(root) {
+  html[data-theme-transition='rtl']::view-transition-new(root) {
     animation-name: themeRevealRightToLeft;
   }
 }

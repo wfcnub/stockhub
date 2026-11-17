@@ -69,7 +69,6 @@ export function ThemeToggle() {
     transition.finished.finally(() => {
       clearThemeTransitionMarker();
     });
-
   };
 
   return (

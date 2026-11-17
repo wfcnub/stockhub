@@ -58,15 +58,16 @@ export default function PriceChart({ data, symbol }: PriceChartProps) {
     let filteredData = data;
 
     if (timeRange !== 'ALL') {
-      const daysBack = {
-        '1M': 30,
-        '3M': 90,
-        '6M': 180,
-        '1Y': 365,
-      }[timeRange] || 365;
+      const daysBack =
+        {
+          '1M': 30,
+          '3M': 90,
+          '6M': 180,
+          '1Y': 365,
+        }[timeRange] || 365;
 
       const cutoffDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
-      filteredData = data.filter(d => new Date(d.time) >= cutoffDate);
+      filteredData = data.filter((d) => new Date(d.time) >= cutoffDate);
     }
 
     candlestickSeries.setData(filteredData);

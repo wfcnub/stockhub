@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
 import type { ChartDataPoint, MACDMovingAverageType } from '@/types';
 import { getChartThemeColors } from '@/lib/chartTheme';
@@ -189,9 +189,10 @@ export function MACDChart({ data, height = 150, mode = 'sma' }: MACDChartProps) 
       .map((d) => ({
         time: d.date as string,
         value: (d.indicators.macd as { value: number; signal: number; histogram: number }).histogram,
-        color: (d.indicators.macd as { value: number; signal: number; histogram: number }).histogram >= 0
-          ? themeColors.volumeUp
-          : themeColors.volumeDown,
+        color:
+          (d.indicators.macd as { value: number; signal: number; histogram: number }).histogram >= 0
+            ? themeColors.volumeUp
+            : themeColors.volumeDown,
       }));
 
     macdLine.setData(macdData);
