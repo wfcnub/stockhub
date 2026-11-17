@@ -28,6 +28,7 @@ class SyncJob(Base):
     )
     total_tickers: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     processed_tickers: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    failed_tickers: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     current_ticker: Mapped[str | None] = mapped_column(String(20))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

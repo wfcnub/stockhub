@@ -9,6 +9,7 @@ created and dropped around it, so a dev or CI database is never modified.
 import os
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -42,3 +43,23 @@ def scratch_db_url() -> Iterator[str]:
         with admin.connect() as conn:
             conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         admin.dispose()
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def alembic_config(url: str):
+    from alembic.config import Config
+
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.attributes["url"] = url
+    cfg.attributes["configure_logger"] = False
+    return cfg
+
+
+@pytest.fixture
+def migrated_url(scratch_db_url: str) -> str:
+    from alembic import command
+
+    command.upgrade(alembic_config(scratch_db_url), "head")
+    return scratch_db_url

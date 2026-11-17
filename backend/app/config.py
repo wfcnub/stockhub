@@ -48,6 +48,17 @@ class Settings(BaseSettings):
 
     # Data sync settings
     DEFAULT_START_DATE: str = "2021-01-01"
+    # Parallel ticker downloads per sync job (threads in the sync worker process).
+    SYNC_WORKERS: int = 4
+    # Re-fetch this many calendar days before the last stored bar, so late revisions by the
+    # data source are picked up by the upsert.
+    SYNC_REFETCH_DAYS: int = 7
+    # Today's daily bar is only stored after this local time in Asia/Jakarta (WIB, UTC+7).
+    # The IDX closing auction and post-trading end before this; the margin covers feed delay.
+    SYNC_BAR_FINAL_AFTER: str = "17:00"
+    # A job still `pending` this long after creation, with no worker holding its lock,
+    # is treated as abandoned.
+    SYNC_PENDING_GRACE_SECONDS: int = 300
 
     # Moving average windows (as specified)
     MA_WINDOWS: Annotated[list[int], NoDecode] = [5, 10, 15, 20, 50, 100, 200]

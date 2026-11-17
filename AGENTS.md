@@ -46,6 +46,10 @@ This file briefs coding agents working in this repository.
   - `cd backend && uv run mypy app` (informational until the models move to `Mapped[]`)
   - Add or change dependencies with `uv add` / `uv add --dev`, never by hand-editing `uv.lock`.
   - Schema changes: edit the models, `uv run alembic revision --autogenerate -m "..."`, review it, update `DB_DESIGN.md`. PostgreSQL tests run when `TEST_DATABASE_URL` points at a PostgreSQL 18 server whose role has CREATEDB.
+- Data sync (separate worker process; the API never runs syncs itself):
+  - `cd backend && uv run python -m app.sync run --index JCI` (options: `--start-date`, `--workers`, `--skip-ticker-list`, `--full`)
+  - `cd backend && uv run python -m app.sync recover` (mark jobs without a live worker as failed)
+  - Exit codes: 0 completed or cancelled, 1 failed, 2 completed with some ticker failures, 3 another sync for the index is running.
 - Frontend local:
   - `cd frontend && npm run dev`
 - Frontend quality gates:
