@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
+import {
+  createChart,
+  ColorType,
+  IChartApi,
+  ISeriesApi,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+} from 'lightweight-charts';
 import type { MouseEventParams, Time } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
 import type { ChartDataPoint, TimeRangeValue, DivergenceEvent, TriangleEvent } from '@/types';
@@ -474,7 +482,7 @@ export function TickerChart({
     chartRef.current = chart;
 
     // Add candlestick series
-    const candlestickSeries = chart.addCandlestickSeries({
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
       upColor: themeColors.positive,
       downColor: themeColors.negative,
       borderDownColor: themeColors.negative,
@@ -486,7 +494,7 @@ export function TickerChart({
     seriesStore.candlestick = candlestickSeries;
 
     // Add volume series
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       color: themeColors.accentPurple,
       priceFormat: {
         type: 'volume',
@@ -506,7 +514,7 @@ export function TickerChart({
     seriesStore.volume = volumeSeries;
 
     if (isBullishView) {
-      const rsiSeries = chart.addLineSeries({
+      const rsiSeries = chart.addSeries(LineSeries, {
         color: themeColors.accentPurple,
         lineWidth: 2,
         priceScaleId: 'rsi',
@@ -543,7 +551,7 @@ export function TickerChart({
       ];
 
       const thresholdSeries = thresholdDefinitions.map((threshold) => {
-        const thresholdLine = chart.addLineSeries({
+        const thresholdLine = chart.addSeries(LineSeries, {
           color: threshold.color,
           lineWidth: 1,
           lineStyle: 2,
@@ -569,7 +577,7 @@ export function TickerChart({
     // Add MA lines
     seriesStore.ma.clear();
     selectedMA.forEach((period) => {
-      const maSeries = chart.addLineSeries({
+      const maSeries = chart.addSeries(LineSeries, {
         color: getMAColor(period, themeColors),
         lineWidth: 2,
         priceScaleId: 'right',

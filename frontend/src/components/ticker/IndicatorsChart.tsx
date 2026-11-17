@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createChart, ColorType, IChartApi } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi, LineSeries, HistogramSeries } from 'lightweight-charts';
 import { useTheme } from 'next-themes';
 import type { ChartDataPoint, MACDMovingAverageType } from '@/types';
 import { getChartThemeColors } from '@/lib/chartTheme';
@@ -46,7 +46,7 @@ export function RSIChart({ data, height = 150 }: IndicatorsChartProps) {
 
     chartRef.current = chart;
 
-    const rsiSeries = chart.addLineSeries({
+    const rsiSeries = chart.addSeries(LineSeries, {
       color: themeColors.accentPurple,
       lineWidth: 2,
     });
@@ -61,19 +61,19 @@ export function RSIChart({ data, height = 150 }: IndicatorsChartProps) {
     rsiSeries.setData(rsiData);
 
     // Add overbought/oversold levels
-    const oversoldLine = chart.addLineSeries({
+    const oversoldLine = chart.addSeries(LineSeries, {
       color: themeColors.positive,
       lineWidth: 1,
       lineStyle: 2,
     });
 
-    const overboughtLine = chart.addLineSeries({
+    const overboughtLine = chart.addSeries(LineSeries, {
       color: themeColors.negative,
       lineWidth: 1,
       lineStyle: 2,
     });
 
-    const middleLine = chart.addLineSeries({
+    const middleLine = chart.addSeries(LineSeries, {
       color: themeColors.muted,
       lineWidth: 1,
       lineStyle: 2,
@@ -152,19 +152,19 @@ export function MACDChart({ data, height = 150, mode = 'sma' }: MACDChartProps) 
     chartRef.current = chart;
 
     // MACD Line
-    const macdLine = chart.addLineSeries({
+    const macdLine = chart.addSeries(LineSeries, {
       color: themeColors.accentPurple,
       lineWidth: 2,
     });
 
     // Signal Line
-    const signalLine = chart.addLineSeries({
+    const signalLine = chart.addSeries(LineSeries, {
       color: themeColors.accentOrange,
       lineWidth: 2,
     });
 
     // Histogram
-    const histogramSeries = chart.addHistogramSeries({
+    const histogramSeries = chart.addSeries(HistogramSeries, {
       priceFormat: {
         type: 'price',
       },

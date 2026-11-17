@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { addIndex, deleteIndex, getIndexes, updateIndex } from '@/lib/api';
+import { ADMIN_ACTIONS_ENABLED, addIndex, deleteIndex, getIndexes, updateIndex } from '@/lib/api';
+import { AdminActionsNotice } from './AdminActionsNotice';
 import type { Index } from '@/types';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 
@@ -522,6 +523,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
               <section className="space-y-3">
                 <h4 className="text-base font-semibold text-gemini-text-primary">Manage Indexes</h4>
                 <p className="text-sm text-gemini-text-secondary">Add, update, and remove index definitions.</p>
+                <AdminActionsNotice />
 
                 <form onSubmit={handleAddIndex} className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)_140px_auto]">
                   <input
@@ -531,7 +533,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
                     placeholder="Code"
                     maxLength={12}
                     className="gemini-input"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   />
                   <input
                     type="text"
@@ -539,7 +541,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
                     onChange={(event) => setNameInput(event.target.value)}
                     placeholder="Index name"
                     className="gemini-input"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   />
                   <input
                     type="text"
@@ -548,12 +550,12 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
                     placeholder="Suffix (.JK)"
                     maxLength={12}
                     className="gemini-input"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   />
                   <button
                     type="submit"
                     className="gemini-button-primary whitespace-nowrap px-4 py-3 text-sm"
-                    disabled={isAdding || isDeleting || isUpdating}
+                    disabled={!ADMIN_ACTIONS_ENABLED || isAdding || isDeleting || isUpdating}
                   >
                     {isAdding ? 'Adding...' : 'Add Index'}
                   </button>
@@ -611,7 +613,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
                             onClick={() => openEditIndex(idx)}
                             className="gemini-button-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
                             aria-label={`Edit index ${idx.code}`}
-                            disabled={isDeleting || isAdding || isUpdating}
+                            disabled={!ADMIN_ACTIONS_ENABLED || isDeleting || isAdding || isUpdating}
                           >
                             <svg
                               className="h-3.5 w-3.5"
@@ -633,7 +635,7 @@ export function ControlShell({ activeSection, title, subtitle, actionLabel, acti
                             type="button"
                             onClick={() => setPendingDelete(idx)}
                             className="gemini-button border-gemini-accent-red/35 px-3 py-1.5 text-xs text-gemini-accent-red"
-                            disabled={isDeleting || isAdding || isUpdating}
+                            disabled={!ADMIN_ACTIONS_ENABLED || isDeleting || isAdding || isUpdating}
                           >
                             Delete
                           </button>

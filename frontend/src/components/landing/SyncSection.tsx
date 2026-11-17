@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import type { Index, SyncProgress } from '@/types';
-import { getIndexes, startSync, getSyncProgress, stopSync } from '@/lib/api';
+import { ADMIN_ACTIONS_ENABLED, getIndexes, startSync, getSyncProgress, stopSync } from '@/lib/api';
+import { AdminActionsNotice } from '@/components/layout/AdminActionsNotice';
 
 const ACTIVE_SYNC_STORAGE_KEY = 'stockhub.active-sync-id';
 
@@ -283,9 +284,11 @@ export function SyncSection() {
           </select>
         </div>
 
+        <AdminActionsNotice />
+
         <button
           onClick={isSyncing ? handleStopSync : handleStartSync}
-          disabled={isSyncing ? isStopping || !syncId : !selectedIndex}
+          disabled={!ADMIN_ACTIONS_ENABLED || (isSyncing ? isStopping || !syncId : !selectedIndex)}
           className={`flex w-full items-center justify-center gap-2 ${
             isSyncing
               ? 'gemini-button border-gemini-accent-red/70 bg-transparent text-gemini-accent-red hover:bg-gemini-accent-red/10'

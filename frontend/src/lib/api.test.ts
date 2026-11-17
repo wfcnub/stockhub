@@ -16,6 +16,7 @@ vi.mock('axios', () => {
 });
 
 import {
+  ADMIN_ACTIONS_ENABLED,
   ApiError,
   deleteIndex,
   getChartData,
@@ -27,6 +28,7 @@ import {
   getTickerDivergences,
   getTickerTriangles,
   getTriangleScreener,
+  isSessionError,
   startSync,
 } from './api';
 import type { TriangleEvent } from '@/types';
@@ -93,6 +95,39 @@ describe('error mapping', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBeNull();
     expect((error as ApiError).message).toMatch(/Cannot reach the StockHub API/);
+  });
+});
+
+describe('access redirects and read-only mode', () => {
+  it('maps an HTML login page to a "reload to sign in" session error', async () => {
+    http.get.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 200, data: '<html>', headers: { 'content-type': 'text/html; charset=utf-8' } },
+    });
+
+    const error = await getTicker('BBCA').catch((e: unknown) => e);
+
+    expect(isSessionError(error)).toBe(true);
+    expect((error as ApiError).message).toMatch(/reload the page to sign in/i);
+  });
+
+  it('does not treat a normal JSON error as a session problem', async () => {
+    http.get.mockRejectedValue(axiosError(403, { detail: 'Forbidden' }));
+
+    const error = await getTicker('BBCA').catch((e: unknown) => e);
+
+    expect(isSessionError(error)).toBe(false);
+    expect((error as ApiError).message).toBe('Forbidden (HTTP 403)');
+  });
+
+  it('a network failure on an absolute API URL is not reported as a session problem', async () => {
+    http.get.mockRejectedValue(axiosError(null));
+
+    expect(isSessionError(await getTicker('BBCA').catch((e: unknown) => e))).toBe(false);
+  });
+
+  it('write calls are enabled with the default absolute API URL', () => {
+    expect(ADMIN_ACTIONS_ENABLED).toBe(true);
   });
 });
 

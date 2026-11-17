@@ -32,6 +32,29 @@ const DEFAULT_API_URL = 'http://localhost:8000/api/v1';
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 
+/** True when the browser talks to this app's own origin (the /api proxy) instead of the backend directly. */
+const USES_SAME_ORIGIN_PROXY = API_BASE_URL.startsWith('/');
+
+/**
+ * Whether write endpoints (sync start/stop, index create/update/delete) can be used from the UI.
+ *
+ * The /api proxy forwards GET and HEAD only until the backend has an admin token, so by default
+ * writes are disabled when the client uses the same-origin proxy and enabled when it talks to the
+ * backend directly (local dev). Override with NEXT_PUBLIC_ADMIN_ACTIONS=enabled|disabled.
+ */
+export const ADMIN_ACTIONS_ENABLED =
+  process.env.NEXT_PUBLIC_ADMIN_ACTIONS === 'enabled'
+    ? true
+    : process.env.NEXT_PUBLIC_ADMIN_ACTIONS === 'disabled'
+      ? false
+      : !USES_SAME_ORIGIN_PROXY;
+
+export const ADMIN_ACTIONS_DISABLED_MESSAGE =
+  'Admin actions are disabled: this deployment is read-only until the admin token is configured.';
+
+export const SESSION_EXPIRED_MESSAGE =
+  'Could not reach StockHub. If your session expired, reload the page to sign in again.';
+
 const client = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
@@ -48,12 +71,37 @@ const client = axios.create({
  */
 export class ApiError extends Error {
   readonly status: number | null;
+  /** `session` = the request most likely hit an Access login redirect (reload to sign in again). */
+  readonly kind: 'session' | 'admin-disabled' | null;
 
-  constructor(message: string, status: number | null) {
+  constructor(message: string, status: number | null, kind: 'session' | 'admin-disabled' | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.kind = kind;
   }
+}
+
+export function isSessionError(error: unknown): boolean {
+  return error instanceof ApiError && error.kind === 'session';
+}
+
+function assertAdminActionsEnabled(): void {
+  if (!ADMIN_ACTIONS_ENABLED) {
+    throw new ApiError(ADMIN_ACTIONS_DISABLED_MESSAGE, 405, 'admin-disabled');
+  }
+}
+
+/**
+ * Behind Cloudflare Access an expired session answers API calls with a redirect to the login host.
+ * The browser blocks that cross-origin redirect (no response, network error), or a login page
+ * (text/html) comes back instead of JSON.
+ */
+function looksLikeAccessLogin(status: number | null, contentType: unknown): boolean {
+  if (status === null) {
+    return USES_SAME_ORIGIN_PROXY;
+  }
+  return typeof contentType === 'string' && contentType.includes('text/html') && [200, 401, 403].includes(status);
 }
 
 function formatDetail(detail: unknown): string | null {
@@ -87,6 +135,10 @@ function toApiError(error: unknown): ApiError {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<{ detail?: unknown; error?: unknown }>;
     const status = axiosError.response?.status ?? null;
+
+    if (looksLikeAccessLogin(status, axiosError.response?.headers?.['content-type'])) {
+      return new ApiError(SESSION_EXPIRED_MESSAGE, status, 'session');
+    }
 
     if (status === null) {
       return new ApiError(`Cannot reach the StockHub API at ${API_BASE_URL}`, null);
@@ -132,22 +184,26 @@ export async function getIndexes(isActive?: boolean): Promise<Index[]> {
   return response.data;
 }
 
-export function addIndex(payload: CreateIndexRequest): Promise<Index> {
+export async function addIndex(payload: CreateIndexRequest): Promise<Index> {
+  assertAdminActionsEnabled();
   return request(client.post<Index>('/indexes', payload));
 }
 
-export function updateIndex(id: number, payload: UpdateIndexRequest): Promise<Index> {
+export async function updateIndex(id: number, payload: UpdateIndexRequest): Promise<Index> {
+  assertAdminActionsEnabled();
   return request(client.patch<Index>(`/indexes/${id}`, payload));
 }
 
 /** `DELETE /indexes/{id}`. Soft delete by default; `hardDelete` permanently removes the index and its tickers. */
-export function deleteIndex(id: number, hardDelete = false): Promise<DeleteIndexResponse> {
+export async function deleteIndex(id: number, hardDelete = false): Promise<DeleteIndexResponse> {
+  assertAdminActionsEnabled();
   return request(client.delete<DeleteIndexResponse>(`/indexes/${id}`, { params: { hard_delete: hardDelete } }));
 }
 
 // ============ Sync ============
 
-export function startSync(indexCode: string, startDate?: string): Promise<SyncStartResponse> {
+export async function startSync(indexCode: string, startDate?: string): Promise<SyncStartResponse> {
+  assertAdminActionsEnabled();
   return request(
     client.post<SyncStartResponse>('/sync/start', null, {
       params: { index_code: indexCode, start_date: startDate },
@@ -160,7 +216,8 @@ export function getSyncProgress(syncId?: string): Promise<SyncProgress> {
   return request(client.get<SyncProgress>('/sync/progress', { params: { sync_id: syncId } }));
 }
 
-export function stopSync(syncId?: string): Promise<SyncStopResponse> {
+export async function stopSync(syncId?: string): Promise<SyncStopResponse> {
+  assertAdminActionsEnabled();
   return request(client.post<SyncStopResponse>('/sync/stop', null, { params: { sync_id: syncId } }));
 }
 
